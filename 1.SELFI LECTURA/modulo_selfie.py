@@ -249,8 +249,18 @@ def ejecutar_selfie():
             wb = Workbook()
             ws = wb.active
 
+            # 🔹 CAMBIO INTEGRADO: columna dinámica según módulo
             modulo = st.session_state.modulo
             col_persona = "Lecturista" if modulo == "Lectura" else "Repartidor"
+
+            # Validar existencia en DataFrame
+            if col_persona not in df.columns:
+                otra_col = "Lecturista" if col_persona == "Repartidor" else "Repartidor"
+                if otra_col in df.columns:
+                    df[col_persona] = df[otra_col]
+                else:
+                    df[col_persona] = ""
+
             url_cols = [c for c in df.columns if "Url_foto" in c]
             max_imgs = len(url_cols)
 

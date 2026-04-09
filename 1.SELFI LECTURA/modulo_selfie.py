@@ -68,6 +68,16 @@ def ejecutar_selfie():
         st.session_state.modulo = modulo
         st.session_state.unidad = unidad
 
+        # 🔹 limpiar datos al cambiar módulo o unidad
+        if "modulo_anterior" not in st.session_state:
+            st.session_state.modulo_anterior = modulo
+            st.session_state.unidad_anterior = unidad
+
+        if modulo != st.session_state.modulo_anterior or unidad != st.session_state.unidad_anterior:
+            st.session_state.df_selfie = None
+            st.session_state.modulo_anterior = modulo
+            st.session_state.unidad_anterior = unidad
+
         df = st.session_state.get("df_selfie", None)
 
         def convertir_fecha(fecha_str):
@@ -92,7 +102,7 @@ def ejecutar_selfie():
                     return datetime.min
 
             fechas_ordenadas = sorted(df["Fecha Selfie"].unique(), key=ordenar_fecha)
-            opciones = ["Todos"] + fechas_ordenadas
+            opciones = fechas_ordenadas
 
             fechas_seleccionadas = st.multiselect(
                 "📅 Fecha",
@@ -100,10 +110,10 @@ def ejecutar_selfie():
                 placeholder="Seleccione una o más fechas"
             )
 
-            if "Todos" in fechas_seleccionadas or not fechas_seleccionadas:
-                df_filtrado = df
+            if not fechas_seleccionadas:
+                df_filtrado = df.copy().reset_index(drop=True)
             else:
-                df_filtrado = df[df["Fecha Selfie"].isin(fechas_seleccionadas)]
+                df_filtrado = df[df["Fecha Selfie"].isin(fechas_seleccionadas)].copy().reset_index(drop=True)
         else:
             st.selectbox("📅 Fecha", ["Primero procesa datos"], disabled=True)
             df_filtrado = None
@@ -195,10 +205,11 @@ def ejecutar_selfie():
                         data_list.append(row)
 
                     df = pd.DataFrame(data_list, columns=columns)
+
                     for fila_idx, (_, row) in enumerate(df.iterrows()):
                         for i in range(max_urls):
                             key = f"obs_{row['Lecturista']}_{i}_{row['Fecha Selfie']}"
-                            st.session_state[key] = "CORRECTO"  # Valor por defecto
+                            st.session_state[key] = "CORRECTO"
 
                     st.session_state.df_selfie = df
                     st.rerun()
@@ -243,25 +254,23 @@ def ejecutar_selfie():
                     else:
                         cols_img[i].empty()
 
-        # BLOQUE DE EXPORTACIÓN EXCEL FINAL
-        if df is not None:
+        # BLOQUE DE EXPORTACIÓN (FILTRADO)
+        if df_filtrado is not None:
             output = BytesIO()
             wb = Workbook()
             ws = wb.active
 
-            # 🔹 CAMBIO INTEGRADO: columna dinámica según módulo
             modulo = st.session_state.modulo
             col_persona = "Lecturista" if modulo == "Lectura" else "Repartidor"
 
-            # Validar existencia en DataFrame
-            if col_persona not in df.columns:
+            if col_persona not in df_filtrado.columns:
                 otra_col = "Lecturista" if col_persona == "Repartidor" else "Repartidor"
-                if otra_col in df.columns:
-                    df[col_persona] = df[otra_col]
+                if otra_col in df_filtrado.columns:
+                    df_filtrado[col_persona] = df_filtrado[otra_col]
                 else:
-                    df[col_persona] = ""
+                    df_filtrado[col_persona] = ""
 
-            url_cols = [c for c in df.columns if "Url_foto" in c]
+            url_cols = [c for c in df_filtrado.columns if "Url_foto" in c]
             max_imgs = len(url_cols)
 
             def letra_columna(idx):
@@ -278,24 +287,21 @@ def ejecutar_selfie():
             ws.append(headers)
 
             fila_inicio = 2
-            primera_columna_imagen = 3  # posición de la primera columna de imágenes
+            primera_columna_imagen = 3
 
-            for fila_idx, (_, row) in enumerate(df.iterrows(), start=fila_inicio):
+            for fila_idx, (_, row) in enumerate(df_filtrado.iterrows(), start=fila_inicio):
                 fila = [row["Fecha Selfie"], row[col_persona]]
 
-                # Agregar URLs
                 for i in range(max_imgs):
                     fila.append(row.get(f"Url_foto {i+1}", ""))
 
-                # Columnas de imágenes: solo la primera celda (fila 2, primera columna de imagen)
                 for i in range(max_imgs):
                     col_letra = letra_columna(primera_columna_imagen + i)
-                    if fila_idx == fila_inicio and i == 0:  # SOLO fila 2, primera columna de imagen
+                    if fila_idx == fila_inicio and i == 0:
                         fila.append(f"'=SI.ERROR(IMAGEN({col_letra}{fila_inicio};;3;250;180);\"\")")
                     else:
-                        fila.append("")  # resto de celdas vacías
+                        fila.append("")
 
-                # Observaciones
                 obs_dict = {}
                 for i in range(max_imgs):
                     key = f"obs_{row[col_persona]}_{i}_{row['Fecha Selfie']}"
@@ -323,14 +329,12 @@ def ejecutar_selfie():
 
                 ws.append(fila)
 
-            # Ajustar filas y columnas
             for r in range(2, ws.max_row + 1):
                 ws.row_dimensions[r].height = 189
 
             for c in range(1, ws.max_column + 1):
                 col_letra = letra_columna(c)
                 ws.column_dimensions[col_letra].width = 25
-                # OCULTAR columnas de URLs
                 if "Url_foto" in ws.cell(row=1, column=c).value:
                     ws.column_dimensions[col_letra].hidden = True
 

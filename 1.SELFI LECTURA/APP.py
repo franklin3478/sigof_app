@@ -1,18 +1,19 @@
 import streamlit as st
 from modulo_selfie import ejecutar_selfie
 from modulo_fise import ejecutar_fise
+from modulo_galeria_reparto import ejecutar_galeria_reparto
+from modulo_galeria_lectura import ejecutar_galeria_lectura
+from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto  # 👈 NUEVO
 
 st.set_page_config(page_title="Sistema SIGOF", layout="wide")
 
 # ----------------------------
 # USUARIOS DEL SISTEMA
 # ----------------------------
-# "rol": "admin" -> tiene privilegios
-# "rol": "usuario" -> solo puede interactuar con la app
 USUARIOS = {
-    "huancayo": {"password": "2026", "rol": "admin"},  # tu usuario principal
-    "aria": {"password": "abcd", "rol": "usuario"},    # usuario normal
-    "juan": {"password": "5678", "rol": "usuario"}     # otro usuario
+    "huancayo": {"password": "2026", "rol": "admin"},
+    "aria": {"password": "abcd", "rol": "usuario"},
+    "juan": {"password": "5678", "rol": "usuario"}
 }
 
 # ----------------------------
@@ -38,7 +39,7 @@ if not st.session_state.logueado:
             st.session_state.usuario_actual = user
             st.session_state.rol = USUARIOS[user]["rol"]
             st.success(f"Bienvenido {user}")
-            st.rerun()  # 🔥 CLAVE para refrescar la app
+            st.rerun()
         else:
             st.error("Credenciales incorrectas")
 
@@ -55,13 +56,14 @@ else:
     # MENÚ LATERAL
     opcion = st.sidebar.selectbox(
         "Selecciona módulo",
-        ["Selfie Lectura", "Validación FISE"]
+        [
+            "Selfie Lectura",
+            "Validación FISE",
+            "Galería Fotos Reparto",
+            "Galería Fotos Lectura",
+            "Seguimiento Reparto"  # 👈 NUEVO
+        ]
     )
-
-    # SOLO ADMIN PUEDE VER BOTONES DE CONFIGURACIÓN (opcional)
-    if st.session_state.rol == "admin":
-        st.sidebar.markdown("⚙️ **Admin Settings**")
-        st.sidebar.button("Manage app")  # solo visible para admin
 
     # NAVEGACIÓN
     if opcion == "Selfie Lectura":
@@ -69,3 +71,12 @@ else:
 
     elif opcion == "Validación FISE":
         ejecutar_fise()
+
+    elif opcion == "Galería Fotos Reparto":
+        ejecutar_galeria_reparto()
+
+    elif opcion == "Galería Fotos Lectura":
+        ejecutar_galeria_lectura()
+
+    elif opcion == "Seguimiento Reparto":  # 👈 NUEVO
+        ejecutar_seguimiento_reparto()

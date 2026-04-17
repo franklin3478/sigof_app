@@ -61,7 +61,7 @@ else:
             "Validación FISE",
             "Galería Fotos Reparto",
             "Galería Fotos Lectura",
-            "Seguimiento Reparto"  # 👈 NUEVO
+            "Seguimiento Reparto", 
         ]
     )
 

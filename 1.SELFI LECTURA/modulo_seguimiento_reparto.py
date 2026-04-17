@@ -1,14 +1,25 @@
 import streamlit as st
 import requests
-import re
 from datetime import datetime
+from bs4 import BeautifulSoup
+import pandas as pd
+import re
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-import pandas as pd
 import math
-from io import BytesIO
+import numpy as np
+
+def limpiar_datos_unidad():
+    keys_a_limpiar = [
+        "ciclos",
+        "monitoreo_df",
+        "resumen_reparto",
+    ]
+
+    for k in keys_a_limpiar:
+        st.session_state.pop(k, None)
 
 # ----------------------------
 # UNIDADES
@@ -26,126 +37,169 @@ mapa_unidades = {
 }
 
 # ----------------------------
-# LIMPIEZA GLOBAL
+# HELPERS
 # ----------------------------
-def limpiar_datos_reparto():
-    for k in [
-        "df_reparto",
-        "resumen_reparto",
-        "imagenes_reparto",
-        "pagina_reparto",
-        "filtros_reparto",
-        "firma_actual"
-    ]:
-        st.session_state.pop(k, None)
+def cambiar_unidad(session, unidad):
+    try:
+        session.post(
+            "http://sigof.distriluz.com.pe/plus/usuario/ajax_cambiar_sesion",
+            data=mapa_unidades[unidad],
+            timeout=20
+        )
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error cambiando unidad: {e}")
 
 # ----------------------------
 # LOGIN
 # ----------------------------
 def login_sigof():
-
     st.subheader("🔐 Login SIGOF")
 
     usuario = st.text_input("Usuario")
     password = st.text_input("Contraseña", type="password")
 
     if st.button("Ingresar"):
-
-        if not usuario or not password:
-            st.warning("Ingresa credenciales")
-            return
-
-        with st.spinner("Conectando a SIGOF..."):
-            session = requests.Session()
+        session = requests.Session()
+        try:
             r = session.post(
                 "http://sigof.distriluz.com.pe/plus/usuario/login",
                 data={
                     "data[Usuario][usuario]": usuario,
                     "data[Usuario][pass]": password
-                }
+                },
+                timeout=30
             )
 
-        if "Salir" in r.text:
-            st.session_state.session_sigof_reparto = session
-            st.session_state.logueado_sigof_reparto = True
-            st.session_state.usuario_sigof = usuario
-            st.rerun()
-        else:
-            st.error("Credenciales incorrectas")
+            if "Salir" in r.text:
+                st.session_state.session_sigof = session
+                st.session_state.logueado_sigof = True
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
+
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error de conexión: {e}")
 
 # ----------------------------
 # CICLOS
 # ----------------------------
-def obtener_ciclos(session, unidad):
+def obtener_ciclos(session, unidad, fecha):
+    cambiar_unidad(session, unidad)
+
+    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_listar_tabla_repartos_historico/U/0/0/0/0/{fecha}/{fecha}/0/"
+
+    try:
+        r = session.get(url, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=30)
+        matches = re.findall(r'(\d+)-(Ciclo[^"<]+)', r.text)
+        return {idc: f"{idc} - {desc.strip()}" for idc, desc in matches}
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error obteniendo ciclos: {e}")
+        return {}
+
+# ----------------------------
+# MONITOREO
+# ----------------------------
+def obtener_monitoreo(session, unidad, fecha, idciclo):
+    cambiar_unidad(session, unidad)
+
+    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_monitorear_reparto_reload/U/{fecha}/{fecha}/{idciclo}/0/0"
+
+    try:
+        r = session.get(url, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=30)
+        return r.text
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error en monitoreo: {e}")
+        return ""
+
+def parsear_monitoreo(html):
+    soup = BeautifulSoup(html, "html.parser")
+    tabla = soup.find("table", {"id": "list-monitorear-lecturistas"})
+
+    if tabla is None:
+        return pd.DataFrame()
+
+    filas = tabla.find("tbody").find_all("tr")
+    data = []
+
+    for fila in filas:
+        cols = fila.find_all("td")
+        if len(cols) < 20:
+            continue
+
+        tiempo_raw = cols[11].get_text(" ", strip=True)
+
+        # 🔥 SOLO HI Y HF
+        match = re.search(r"(HI:\s*\d{2}:\d{2}:\d{2}).*?(HF:\s*\d{2}:\d{2}:\d{2})", tiempo_raw)
+
+        if match:
+            tiempo_limpio = f"{match.group(1)} / {match.group(2)}"
+        else:
+            tiempo_limpio = tiempo_raw
+
+        avance_raw = cols[14].get_text(strip=True)
+        avance_raw = re.sub(r"\s+", "", avance_raw)
+
+        data.append({
+            "repartidor": cols[8].get_text(strip=True),
+            "asi": cols[9].get_text(strip=True),
+            "des": cols[10].get_text(strip=True),
+            "tiempo": tiempo_limpio,
+            "fin": cols[12].get_text(strip=True),
+            "p": cols[13].get_text(strip=True),
+            "% avance": avance_raw,
+            "validados": cols[15].get_text(strip=True),
+            "entregado": cols[16].get_text(strip=True),
+            "paso_ruta": cols[17].get_text(strip=True),
+        })
+
+    return pd.DataFrame(data)
+
+# ----------------------------
+# DESCARGA EXCEL
+# ----------------------------
+def descargar_excel_ciclo(session, unidad, idc):
+    cambiar_unidad(session, unidad)
 
     hoy = datetime.today().strftime("%Y-%m-%d")
-    u = mapa_unidades[unidad]
 
-    session.post(
-        "http://sigof.distriluz.com.pe/plus/usuario/ajax_cambiar_sesion",
-        data=u
-    )
+    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_reporte_excel_ordenes_historico/U/0/{idc}/0/0/{hoy}/{hoy}/0/"
 
-    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_listar_tabla_repartos_historico/U/0/0/0/0/{hoy}/{hoy}/0/"
+    try:
+        r = session.get(url, timeout=60)
 
-    r = session.get(url, headers={"X-Requested-With": "XMLHttpRequest"})
-
-    return {
-        idc: f"{idc}-{desc}".strip()
-        for idc, desc in re.findall(r'(\d+)-(Ciclo[^<"]+)', r.text)
-    }
-
-# ----------------------------
-# HELPERS
-# ----------------------------
-def obtener_id_ciclo(ciclo_texto):
-    return ciclo_texto.split("-")[0]
-
-def descargar_excel_ciclo(session, unidad, idc):
-
-    u = mapa_unidades[unidad]
-
-    session.post(
-        "http://sigof.distriluz.com.pe/plus/usuario/ajax_cambiar_sesion",
-        data=u
-    )
-
-    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_reporte_excel_ordenes_historico/U/0/{idc}/0/0/2026-01-14/2026-01-14/0/"
-
-    r = session.get(url)
-
-    if r.status_code == 200 and r.content:
-        return load_workbook(BytesIO(r.content))
+        if r.status_code == 200 and r.content:
+            return load_workbook(BytesIO(r.content))
+    except requests.exceptions.RequestException:
+        pass
 
     return None
 
-def descargar_ciclos_excel(session, unidad, ciclos_seleccionados):
+def descargar_ciclos_excel(session, unidad, ids):
 
-    resultados = []
+    resultados = {}
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        tareas = []
+        futures = {
+            executor.submit(descargar_excel_ciclo, session, unidad, idc): idc
+            for idc in ids
+        }
 
-        for ciclo in ciclos_seleccionados:
-            idc = obtener_id_ciclo(ciclo)
-            tareas.append(executor.submit(descargar_excel_ciclo, session, unidad, idc))
+        for future in as_completed(futures):
+            idc = futures[future]
+            wb = future.result()
 
-        for f in as_completed(tareas):
-            wb = f.result()
             if wb:
-                resultados.append(wb)
+                resultados[idc] = wb
 
     return resultados
 
 # ----------------------------
-# EXCEL → DATAFRAME
+# EXCEL → DF
 # ----------------------------
 def excel_a_dataframe(wb):
-
     ws = wb.active
 
     foto_col_idx = None
-
     for idx, cell in enumerate(ws[1], start=1):
         if str(cell.value).strip().lower() == "foto":
             foto_col_idx = idx
@@ -177,57 +231,77 @@ def excel_a_dataframe(wb):
     return df
 
 # ----------------------------
-# PROCESAR
+# LIMPIEZA
+# ----------------------------
+def limpiar_dataframe(df):
+    df.columns = df.columns.str.strip().str.lower()
+
+    df["fise"] = pd.to_numeric(df.get("fise", 0), errors="coerce").fillna(0)
+
+    df["foto"] = (
+        df.get("foto", "")
+        .astype(str)
+        .str.strip()
+        .replace(["nan", "none", "NaN", ""], "")
+    )
+
+    return df
+
+# ----------------------------
+# FLAGS + FEATURES
+# ----------------------------
+def agregar_flags(df):
+    df["fise_es_1"] = df["fise"] == 1
+    df["tiene_foto"] = df["foto"].str.contains("http", na=False)
+    df["fise_con_foto_flag"] = df["fise_es_1"] & df["tiene_foto"]
+    return df
+
+# ----------------------------
+# PROCESAMIENTO
 # ----------------------------
 def procesar_dataframe(df):
+    df = agregar_flags(df)
 
-    df.columns = df.columns.str.strip()
-
-    df["fise"] = df["fise"].astype(str).str.strip()
-    df["foto"] = df["foto"].astype(str)
-
-    df["tiene_foto"] = df["foto"].astype(str).str.startswith("http")
-
-    df["fise_es_1"] = df["fise"].isin(["1", "1.0"])
+    def calc(total):
+        return math.ceil(total * 0.10) if total < 10 else math.floor(total * 0.10)
 
     resumen = (
         df.groupby("ruta")
         .agg(
             lecturista=("lecturista", "first"),
-            ciclo=("idciclo", "first"),
+            ciclo=("ciclo", "first"),
             total_suministros=("ruta", "count"),
             fise_obligatorio=("fise_es_1", "sum"),
-            fotos_tomadas=("tiene_foto", "sum")
+            fotos_tomadas=("tiene_foto", "sum"),
+            fise_con_foto=("fise_con_foto_flag", "sum")
         )
         .reset_index()
     )
 
-    def calc(total):
-        return math.ceil(total * 0.10) if total < 10 else math.floor(total * 0.10)
+    st.session_state.lecturistas_options = sorted(resumen["lecturista"].dropna().unique())
+    st.session_state.ciclos_options = sorted(resumen["ciclo"].dropna().unique())
+    st.session_state.rutas_options = sorted(resumen["ruta"].dropna().unique())
 
-    resumen["cant_min_foto"] = resumen["total_suministros"].apply(calc)
-
-    resumen["consignado"] = resumen.apply(
-        lambda r: "NO CUENTA CON FOTOS" 
-        if r["fotos_tomadas"] == 0
-        else ("CUMPLIÓ EL 10%" if r["fotos_tomadas"] >= r["cant_min_foto"] else "NO CUMPLIÓ EL 10%"),
-        axis=1
+    resumen["fise_sin_foto"] = (resumen["fise_obligatorio"] - resumen["fise_con_foto"]).clip(lower=0)
+        
+    resumen["cant_min_foto"] = np.where(
+        resumen["total_suministros"] < 10,
+        np.ceil(resumen["total_suministros"] * 0.10),
+        np.floor(resumen["total_suministros"] * 0.10)
     )
 
-    df["fise_con_foto_flag"] = df["fise_es_1"] & df["tiene_foto"]
+    resumen["consignado"] = "NO CUMPLIÓ EL 10%"
 
-    resumen["fise_con_foto"] = (
-        df.groupby("ruta")["fise_con_foto_flag"].sum().values
-    )
+    resumen.loc[resumen["fotos_tomadas"] == 0, "consignado"] = "NO CUENTA CON FOTOS"
 
-    resumen["fise_sin_foto"] = (
-        resumen["fise_obligatorio"] - resumen["fise_con_foto"]
-    )
-       
+    resumen.loc[
+        resumen["fotos_tomadas"] >= resumen["cant_min_foto"],
+        "consignado"
+    ] = "CUMPLIÓ EL 10%"
+
     resumen["cumplimiento_fise"] = resumen.apply(
-       lambda r: "CUMPLIÓ" if r["fise_con_foto"] == r["fise_obligatorio"]
-       else "NO CUMPLIÓ",
-       axis=1
+        lambda r: "CUMPLIÓ" if r["fise_con_foto"] == r["fise_obligatorio"] else "NO CUMPLIÓ",
+        axis=1
     )
 
     return resumen
@@ -238,257 +312,473 @@ def to_excel(df):
         df.to_excel(writer, index=False)
     return output.getvalue()
 
+def aplicar_filtros_global(df):
+    lect = st.session_state.get("filtro_lecturista", [])
+    ciclo = st.session_state.get("filtro_ciclo", [])
+    
+    if lect and "lecturista" in df.columns:
+        df = df[df["lecturista"].isin(lect)]
+
+    if ciclo and "ciclo" in df.columns:
+        df = df[df["ciclo"].isin(ciclo)]
+    
+    return df
+
+def resetear_filtros():
+    keys = [
+        "filtro_lecturista",
+        "filtro_ciclo",
+        "filtro_ruta",
+        "filtro_ruta_local",
+        "filtro_fise_local",
+        "filtro_consignado_local",
+    ]
+
+    for k in keys:
+        if k in st.session_state:
+            del st.session_state[k]
+
+    # 🔥 evita que streamlit recupere valores anteriores
+    st.session_state["filtro_lecturista"] = []
+    st.session_state["filtro_ciclo"] = []
+
 # ----------------------------
 # MAIN
 # ----------------------------
+unidad_actual = st.session_state.get("unidad_actual")
 def ejecutar_seguimiento_reparto():
 
-    for k, v in {
-        "logueado_sigof_reparto": False,
-        "session_sigof_reparto": None,
-        "ciclos_reparto": {},
-        "unidad_actual_reparto": None,
-        "ultima_actualizacion": None,
-        "mensaje_ciclos": None,
-        "tipo_mensaje": None,
-        "ciclos_previos": []
-    }.items():
-        st.session_state.setdefault(k, v)
+    st.session_state.setdefault("logueado_sigof", False)
+    st.session_state.setdefault("ciclos", {})
 
-    if not st.session_state.logueado_sigof_reparto:
+    if not st.session_state.logueado_sigof:
         login_sigof()
         return
 
-    session = st.session_state.session_sigof_reparto
+    session = st.session_state.session_sigof
+    fecha = datetime.today().strftime("%Y-%m-%d")
 
-    st.title("📦 Seguimiento de Reparto")
-    st.caption(f"Usuario: {st.session_state.usuario_sigof}")
+    st.title("📊Seguimiento de Reparto")
 
     col1, col2 = st.columns(2)
 
     with col1:
+        st.session_state.setdefault("unidad_actual", None)
+
         unidad = st.selectbox("Unidad", list(mapa_unidades.keys()))
 
-    if unidad != st.session_state.unidad_actual_reparto:
-        st.session_state.unidad_actual_reparto = unidad
-        st.session_state.ciclos_reparto = {}
-        st.session_state.ultima_actualizacion = None
-        limpiar_datos_reparto()
+        # 🔥 DETECTAR CAMBIO DE UNIDAD
+        if st.session_state.get("unidad_actual") != unidad:
+            limpiar_datos_unidad()
+            st.session_state["unidad_actual"] = unidad
+            st.rerun()
+    
+    # Botón NO se mueve (misma lógica)
+    if st.button("📡 Obtener ciclos"):
+        st.session_state.ciclos = obtener_ciclos(session, unidad, fecha)
+
+        # 🔥 FORZAR RESET REAL
+        st.session_state["ciclos_multiselect"] = []
+
+        # limpiar data previa
+        st.session_state.pop("monitoreo_df", None)
+        st.session_state.pop("resumen_reparto", None)
+
+        # limpiar filtros
+        for k in [
+            "filtro_lecturista",
+            "filtro_ciclo",
+            "filtro_ruta",
+            "filtro_ruta_local",
+            "filtro_fise_local",
+            "filtro_consignado_local",
+        ]:
+            st.session_state.pop(k, None)
+
+        st.rerun()
+
+    ciclos_dict = st.session_state.get("ciclos", {})
 
     with col2:
-        ciclos_dict = st.session_state.ciclos_reparto
+        if ciclos_dict:
+            ciclos_seleccionados = st.multiselect(
+                "Ciclo",
+                list(ciclos_dict.values()),
+                default=st.session_state.get("ciclos_multiselect", []),
+                key="ciclos_multiselect"
+            )
 
-        ciclos_seleccionados = (
-            st.multiselect("Ciclos", list(ciclos_dict.values()))
-            if ciclos_dict else []
-        )
+            ids_ciclos = [
+                list(ciclos_dict.keys())[list(ciclos_dict.values()).index(c)]
+                for c in ciclos_seleccionados
+            ]
+        else:
+            ciclos_seleccionados = []
+            ids_ciclos = []
 
-        if not ciclos_dict:
-            st.selectbox("Ciclos", ["-- obtener primero --"], disabled=True)
-
-    if set(ciclos_seleccionados) != set(st.session_state.ciclos_previos):
-        limpiar_datos_reparto()
-        st.session_state.ciclos_previos = ciclos_seleccionados
-
-    if st.session_state.ultima_actualizacion:
-        st.caption(f"Última actualización: {st.session_state.ultima_actualizacion}")
-
-    if st.session_state.mensaje_ciclos:
-        getattr(st, st.session_state.tipo_mensaje)(st.session_state.mensaje_ciclos)
-        st.session_state.mensaje_ciclos = None
-
-    colb1, colb2, colb3 = st.columns(3)
-
-    with colb1:
-        if st.button("📡 Obtener ciclos"):
-            if st.session_state.ciclos_reparto:
-                st.session_state.mensaje_ciclos = "Ya cargados (usa actualizar)"
-                st.session_state.tipo_mensaje = "info"
-            else:
-                with st.spinner("Consultando..."):
-                    ciclos = obtener_ciclos(session, unidad)
-
-                if ciclos:
-                    limpiar_datos_reparto()
-                    st.session_state.ciclos_reparto = ciclos
-                    st.session_state.ultima_actualizacion = datetime.now().strftime("%H:%M:%S")
-                    st.session_state.mensaje_ciclos = f"{len(ciclos)} ciclos encontrados"
-                    st.session_state.tipo_mensaje = "success"
-
-                else:
-                    st.session_state.mensaje_ciclos = "Sin resultados"
-                    st.session_state.tipo_mensaje = "warning"
-
-            st.rerun()
-
-    with colb2:
-        if st.button("🔄 Actualizar"):
-            with st.spinner("Verificando cambios..."):
-                nuevos = obtener_ciclos(session, unidad)
-
-            if nuevos != st.session_state.ciclos_reparto:
-                limpiar_datos_reparto()
-                st.session_state.ciclos_reparto = nuevos
-                st.session_state.ultima_actualizacion = datetime.now().strftime("%H:%M:%S")
-                st.session_state.mensaje_ciclos = f"Actualizado: {len(nuevos)} ciclos"
-                st.session_state.tipo_mensaje = "success"
-            else:
-                st.session_state.mensaje_ciclos = "No hay nuevos datos"
-                st.session_state.tipo_mensaje = "info"
-
-            st.rerun()
-
-    with colb3:
-        if st.button("🔓 Cerrar sesión"):
-            st.session_state.clear()
-            st.rerun()
-
-    if ciclos_seleccionados:
-
-        st.markdown("---")
-
-        if st.button("📊 Procesar ciclos"):
-            with st.spinner("Descargando y procesando..."):
-                wbs = descargar_ciclos_excel(session, unidad, ciclos_seleccionados)
-                dfs = [excel_a_dataframe(wb) for wb in wbs]
-                df_total = pd.concat(dfs, ignore_index=True)
-                resumen = procesar_dataframe(df_total)
-                st.session_state.resumen_reparto = resumen
-
-            st.success("✅ Procesamiento completo")
+    if not ciclos_dict:
+        st.info("Selecciona una unidad y obtén ciclos")
+        return
+    
+    # ----------------------------
+    # FILTROS GLOBALES (ARRIBA)
+    # ----------------------------
+    st.markdown("---")
+    
+    lecturistas_options = st.session_state.get("lecturistas_options", [])
+    ciclos_options = st.session_state.get("ciclos_options", [])
+    
+    col1, col2 = st.columns(2)
 
     # ----------------------------
-    # FILTROS (RUTA DEPENDE DE LECTURISTA + CICLO)
+    # FILTROS DEPENDIENTES (CORREGIDO)
+    # ----------------------------
+
+    # ----------------------------
+    # FILTROS DEPENDIENTES (CORRECTO LECTURISTA → CICLO)
+    # ----------------------------
+
+    df_base_global = st.session_state.get("resumen_reparto")
+
+    if df_base_global is None:
+        lecturistas_filtrados = st.session_state.get("lecturistas_options", [])
+        ciclos_filtrados = st.session_state.get("ciclos_options", [])
+
+    else:
+        df_tmp = df_base_global.copy()
+
+        lect_sel = st.session_state.get("filtro_lecturista", [])
+        ciclo_sel = st.session_state.get("filtro_ciclo", [])
+
+        # =========================
+        # 🔥 LECTURISTA FILTRA BASE PARA CICLO
+        # =========================
+        if lect_sel:
+            df_tmp_ciclo = df_tmp[df_tmp["lecturista"].isin(lect_sel)]
+        else:
+            df_tmp_ciclo = df_tmp
+
+        # ciclos DEPENDEN del lecturista
+        ciclos_filtrados = sorted(df_tmp_ciclo["ciclo"].dropna().unique())
+
+        # =========================
+        # 🔥 CICLO FILTRA BASE PARA LECTURISTA (opcional simétrico)
+        # =========================
+        if ciclo_sel:
+            df_tmp_lect = df_tmp[df_tmp["ciclo"].isin(ciclo_sel)]
+        else:
+            df_tmp_lect = df_tmp
+
+        lecturistas_filtrados = sorted(df_tmp_lect["lecturista"].dropna().unique())
+        ciclos_filtrados = sorted(df_tmp_ciclo["ciclo"].dropna().unique())
+        
+    with col1:
+        st.multiselect("Lecturista", lecturistas_filtrados, key="filtro_lecturista")
+
+    with col2:
+        st.multiselect("Ciclo", ciclos_filtrados, key="filtro_ciclo")
+
+    if st.button("📊 Monitoreo"):
+
+        if not ids_ciclos:
+            st.warning("Selecciona al menos un ciclo")
+            return
+
+        df_monitoreo_total = []
+
+        for idc in ids_ciclos:
+            html = obtener_monitoreo(session, unidad, fecha, idc)
+            df_mon = parsear_monitoreo(html)
+
+            if not df_mon.empty:
+                df_mon["ciclo"] = ciclos_dict[idc]
+                df_monitoreo_total.append(df_mon)
+
+        if df_monitoreo_total:
+            df_monitoreo_total = pd.concat(df_monitoreo_total, ignore_index=True)            
+            df_monitoreo_total.rename(columns={"repartidor": "lecturista"}, inplace=True)
+
+            # =========================
+            # 🔥 CONSIGNADO 10% GENERAL (SIN columna extra de cálculo)
+            # =========================
+
+            df_monitoreo_total["asi"] = pd.to_numeric(df_monitoreo_total["asi"], errors="coerce").fillna(0)
+            df_monitoreo_total["entregado"] = pd.to_numeric(df_monitoreo_total["entregado"], errors="coerce").fillna(0)
+
+            df_monitoreo_total["consignado"] = df_monitoreo_total.apply(
+                lambda r: "----------"
+                if str(r["% avance"]).replace(" ", "").startswith("100")
+                else (
+                    "CUMPLIÓ EL 10% GENERAL"
+                    if r["entregado"] >= math.ceil(r["asi"] * 0.10)
+                    else "NO CUMPLIÓ EL 10% GENERAL"
+                ),
+                axis=1
+            )
+
+            cols = df_monitoreo_total.columns.tolist()
+
+            if "ciclo" in cols and "lecturista" in cols:
+                cols.remove("ciclo")
+                idx = cols.index("lecturista")
+                cols.insert(idx, "ciclo")
+
+            df_monitoreo_total = df_monitoreo_total[cols]
+            
+            st.session_state.lecturistas_options = sorted(df_monitoreo_total["lecturista"].dropna().unique())
+            st.session_state.ciclos_options = sorted(df_monitoreo_total["ciclo"].dropna().unique())
+            st.session_state.rutas_options = []  # aún no existen en monitoreo
+            
+            resetear_filtros()  # 👈 LIMPIA FILTROS
+
+            def limpiar_estado_unidad():
+                keys = [
+                    "ciclos",
+                    "monitoreo_df",
+                    "resumen_reparto",
+                    "lecturistas_options",
+                    "ciclos_options",
+                    "rutas_options",
+                    "filtro_lecturista",
+                    "filtro_ciclo",
+                    "filtro_ruta",
+                    "filtro_ruta_local",
+                    "filtro_fise_local",
+                    "filtro_consignado_local",
+                ]
+
+                for k in keys:
+                    st.session_state.pop(k, None)
+
+            st.session_state.monitoreo_df = df_monitoreo_total
+            
+            if "resumen_reparto" in st.session_state:
+                del st.session_state.resumen_reparto
+
+            st.rerun()
+
+        else:
+            st.warning("No hay datos de monitoreo")
+
+    if "monitoreo_df" in st.session_state:
+        st.subheader("📡 Monitoreo")
+
+        df_mon = st.session_state.monitoreo_df.copy()
+        df_mon = aplicar_filtros_global(df_mon)
+
+        st.dataframe(df_mon, use_container_width=True)
+
+        st.download_button(
+            "⬇ Descargar Monitoreo",
+            data=to_excel(df_mon),
+            file_name="monitoreo.xlsx"
+        )
+            
+        # ----------------------------
+        # PROCESAR EXCEL SOLO AQUÍ
+        # ----------------------------
+        if "resumen_reparto" not in st.session_state:
+
+            wbs = descargar_ciclos_excel(session, unidad, ids_ciclos)
+
+            def procesar_wb(idc, wb):
+                if wb:
+                    df_tmp = excel_a_dataframe(wb)
+                    df_tmp["idciclo"] = idc
+                    df_tmp["ciclo"] = ciclos_dict[idc]
+                    return df_tmp
+                return None
+
+            dfs = []
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [
+                    executor.submit(procesar_wb, idc, wbs.get(idc))
+                    for idc in ids_ciclos
+                ]
+
+                for future in as_completed(futures):
+                    df_tmp = future.result()
+                    if df_tmp is not None:
+                        dfs.append(df_tmp)
+
+            if not dfs:
+                st.error("No se pudo obtener datos de reportes")
+                return
+
+            df_total = pd.concat(dfs, ignore_index=True)
+            df_total = limpiar_dataframe(df_total)
+
+            resumen = procesar_dataframe(df_total)
+
+            st.session_state.resumen_reparto = resumen
+
+    # ----------------------------
+    # FILTROS
     # ----------------------------
     if "resumen_reparto" in st.session_state:
 
         st.markdown("---")
+
+        # ----------------------------
+        # BASE
+        # ----------------------------
         df = st.session_state.resumen_reparto.copy()
 
-        st.subheader("🔎 Filtros")
+        # aplicar SOLO filtros globales primero
+        df = aplicar_filtros_global(df)
+              
+        # =========================
+        # BASE PARA OPCIONES (NO incluye ruta)
+        # =========================
+        df_base_opciones = st.session_state.resumen_reparto.copy()
+
+        lect = st.session_state.get("filtro_lecturista", [])
+        ciclo = st.session_state.get("filtro_ciclo", [])
+
+        if lect:
+            df_base_opciones = df_base_opciones[df_base_opciones["lecturista"].isin(lect)]
+
+        if ciclo:
+            df_base_opciones = df_base_opciones[df_base_opciones["ciclo"].isin(ciclo)]
+
+        rutas_filtradas = sorted(df_base_opciones["ruta"].dropna().unique())
+
+        # =========================
+        # BASE REAL (para filtros finales)
+        # =========================
+        df_base = st.session_state.resumen_reparto.copy()
+
+        ruta = st.session_state.get("filtro_ruta_local", [])
+        fise_sel_actual = st.session_state.get("filtro_fise_local", [])
+        consignado_sel_actual = st.session_state.get("filtro_consignado_local", [])
+
+        if lect:
+            df_base = df_base[df_base["lecturista"].isin(lect)]
+
+        if ciclo:
+            df_base = df_base[df_base["ciclo"].isin(ciclo)]
+
+        if ruta:
+            df_base = df_base[df_base["ruta"].isin(ruta)]
+            
+        # =========================
+        # ESTADO ACTUAL DE FILTROS
+        # =========================
+
+        fise_sel_actual = st.session_state.get("filtro_fise_local", [])
+        consignado_sel_actual = st.session_state.get("filtro_consignado_local", [])
+
+
+        # =========================
+        # CONSIGNADO DEPENDE DE (BASE + FISE)
+        # =========================
+
+        df_tmp_consignado = df_base.copy()
+
+        if fise_sel_actual:
+            df_tmp_consignado = df_tmp_consignado[
+                df_tmp_consignado["cumplimiento_fise"].isin(fise_sel_actual)
+            ]
+
+        consignado_opciones = sorted(
+            df_tmp_consignado["consignado"].dropna().unique()
+        )
+
+
+        # =========================
+        # FISE DEPENDE DE (BASE + CONSIGNADO)
+        # =========================
+
+        df_tmp_fise = df_base.copy()
+
+        if consignado_sel_actual:
+            df_tmp_fise = df_tmp_fise[
+                df_tmp_fise["consignado"].isin(consignado_sel_actual)
+            ]
+
+        fise_opciones = sorted(
+            df_tmp_fise["cumplimiento_fise"].dropna().unique()
+        )
+
+
+        # =========================
+        # LIMPIEZA DE SELECCIONES INVALIDAS
+        # =========================
+
+        st.session_state["filtro_fise_local"] = [
+            x for x in st.session_state.get("filtro_fise_local", [])
+            if x in fise_opciones
+        ]
+
+        st.session_state["filtro_consignado_local"] = [
+            x for x in st.session_state.get("filtro_consignado_local", [])
+            if x in consignado_opciones
+        ]
+
+        st.session_state["filtro_ruta_local"] = [
+            x for x in st.session_state.get("filtro_ruta_local", [])
+            if x in rutas_filtradas
+        ]
 
         # ----------------------------
-        # LECTURISTA OPTIONS (depende de ciclo + ruta)
+        # UI FILTROS (3 EN UNA FILA)
         # ----------------------------
-        df_lect = df.copy()
 
-        # CICLO FILTRO TEMPORAL
-        ciclos_tmp = st.session_state.get("filtro_ciclo", [])
-        rutas_tmp = st.session_state.get("filtro_ruta", [])
+        col1, col2, col3 = st.columns(3)
 
-        if ciclos_tmp:
-            df_lect = df_lect[df_lect["ciclo"].isin(ciclos_tmp)]
-
-        if rutas_tmp:
-            df_lect = df_lect[df_lect["ruta"].isin(rutas_tmp)]
-
-        lecturistas_options = sorted(df_lect["lecturista"].dropna().unique())
-
-        # ----------------------------
-        # CICLO OPTIONS
-        # ----------------------------
-        df_ciclo = df.copy()
-
-        lect_tmp = st.session_state.get("filtro_lecturista", [])
-        rutas_tmp = st.session_state.get("filtro_ruta", [])
-
-        if lect_tmp:
-            df_ciclo = df_ciclo[df_ciclo["lecturista"].isin(lect_tmp)]
-
-        if rutas_tmp:
-            df_ciclo = df_ciclo[df_ciclo["ruta"].isin(rutas_tmp)]
-
-        ciclos_options = sorted(df_ciclo["ciclo"].dropna().unique())
-
-        # ----------------------------
-        # RUTA OPTIONS
-        # ----------------------------
-        df_ruta = df.copy()
-
-        lect_tmp = st.session_state.get("filtro_lecturista", [])
-        ciclo_tmp = st.session_state.get("filtro_ciclo", [])
-
-        if lect_tmp:
-            df_ruta = df_ruta[df_ruta["lecturista"].isin(lect_tmp)]
-
-        if ciclo_tmp:
-            df_ruta = df_ruta[df_ruta["ciclo"].isin(ciclo_tmp)]
-
-        rutas_options = sorted(df_ruta["ruta"].dropna().unique())
-
-        # ----------------------------
-        # WIDGETS (UNA SOLA VEZ)
-        # ----------------------------
-        colf1, colf2, colf3 = st.columns(3)
-
-        with colf1:
-            lecturistas = st.multiselect(
-                "Lecturista",
-                lecturistas_options,
-                key="filtro_lecturista"
-            )
-
-        with colf2:
-            ciclos = st.multiselect(
-                "Ciclo",
-                ciclos_options,
-                key="filtro_ciclo"
-            )
-
-        with colf3:
-            rutas = st.multiselect(
+        with col1:
+            ruta_seleccionada = st.multiselect(
                 "Ruta",
-                rutas_options,
-                key="filtro_ruta"
+                rutas_filtradas,
+                key="filtro_ruta_local"
             )
-        
-        # 🔥 BASE PARA DEPENDENCIA DE RUTA
-        df_ruta_base = df.copy()
 
-        if lecturistas:
-            df_ruta_base = df_ruta_base[df_ruta_base["lecturista"].isin(lecturistas)]
+        with col2:
+            fise_sel = st.multiselect(
+                "Cumplimiento FISE",
+                fise_opciones,
+                key="filtro_fise_local"
+            )
 
-        if ciclos:
-            df_ruta_base = df_ruta_base[df_ruta_base["ciclo"].isin(ciclos)]
+        with col3:
+            consignado_sel = st.multiselect(
+                "Consignado",
+                consignado_opciones,
+                key="filtro_consignado_local"
+            )
 
-                # FILTRADO FINAL
-        if lecturistas:
-            df = df[df["lecturista"].isin(lecturistas)]
+        # ----------------------------
+        # APLICAR FILTROS
+        # ----------------------------
 
-        if ciclos:
-            df = df[df["ciclo"].isin(ciclos)]
+        df = st.session_state.resumen_reparto.copy()
 
-        if rutas:
-            df = df[df["ruta"].isin(rutas)]
+        df = aplicar_filtros_global(df)
 
+        if ruta_seleccionada:
+            df = df[df["ruta"].isin(ruta_seleccionada)]
+
+        if fise_sel:
+            df = df[df["cumplimiento_fise"].isin(fise_sel)]
+
+        if consignado_sel:
+            df = df[df["consignado"].isin(consignado_sel)]
+               
         st.subheader("📊 Cumplimiento FISE")
-
         df_fise = df[
             ["lecturista","ciclo","ruta","total_suministros",
              "fise_obligatorio","fise_con_foto","fise_sin_foto","cumplimiento_fise"]
         ]
 
         st.dataframe(df_fise, use_container_width=True)
-
-        st.download_button(
-            "⬇ Descargar FISE",
-            data=to_excel(df_fise),
-            file_name="fise.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("⬇ Descargar FISE", data=to_excel(df_fise), file_name="fise.xlsx")
 
         st.subheader("📊 Cumplimiento 10% Fotos")
-
         df_10 = df[
             ["lecturista","ciclo","ruta","total_suministros",
              "fotos_tomadas","cant_min_foto","consignado"]
         ]
 
         st.dataframe(df_10, use_container_width=True)
-
-        st.download_button(
-            "⬇ Descargar 10%",
-            data=to_excel(df_10),
-            file_name="cumplimiento_10.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("⬇ Descargar 10%", data=to_excel(df_10), file_name="cumplimiento_10.xlsx")

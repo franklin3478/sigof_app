@@ -123,13 +123,15 @@ def parsear_monitoreo(html):
 
     for fila in filas:
         cols = fila.find_all("td")
-        if len(cols) < 20:
+        if len(cols) < 18:
             continue
 
         tiempo_raw = cols[11].get_text(" ", strip=True)
 
-        # 🔥 SOLO HI Y HF
-        match = re.search(r"(HI:\s*\d{2}:\d{2}:\d{2}).*?(HF:\s*\d{2}:\d{2}:\d{2})", tiempo_raw)
+        match = re.search(
+            r"(HI:\s*\d{2}:\d{2}:\d{2}).?(HF:\s\d{2}:\d{2}:\d{2})",
+            tiempo_raw
+        )
 
         if match:
             tiempo_limpio = f"{match.group(1)} / {match.group(2)}"
@@ -147,7 +149,6 @@ def parsear_monitoreo(html):
             "fin": cols[12].get_text(strip=True),
             "p": cols[13].get_text(strip=True),
             "% avance": avance_raw,
-            "validados": cols[15].get_text(strip=True),
             "entregado": cols[16].get_text(strip=True),
             "paso_ruta": cols[17].get_text(strip=True),
         })
@@ -247,6 +248,37 @@ def limpiar_dataframe(df):
 
     return df
 
+# 🔥 NUEVA FUNCIÓN AQUÍ
+def obtener_df_total(session, unidad, ids_ciclos, ciclos_dict):
+
+    cache_key = (unidad, tuple(sorted(ids_ciclos)))
+
+    if st.session_state.get("df_total_key") == cache_key:
+        return st.session_state.get("df_total")
+
+    # 🔥 recalcular porque cambió selección
+    wbs = descargar_ciclos_excel(session, unidad, ids_ciclos)
+
+    dfs = []
+    for idc in ids_ciclos:
+        wb = wbs.get(idc)
+        if wb:
+            df_tmp = excel_a_dataframe(wb)
+            df_tmp["ciclo"] = ciclos_dict[idc]
+            dfs.append(df_tmp)
+
+    if not dfs:
+        return None
+
+    df_total = pd.concat(dfs, ignore_index=True)
+    df_total = limpiar_dataframe(df_total)
+
+    # 🔥 guardar con clave
+    st.session_state.df_total = df_total
+    st.session_state.df_total_key = cache_key
+
+    return df_total
+
 # ----------------------------
 # FLAGS + FEATURES
 # ----------------------------
@@ -266,10 +298,8 @@ def procesar_dataframe(df):
         return math.ceil(total * 0.10) if total < 10 else math.floor(total * 0.10)
 
     resumen = (
-        df.groupby("ruta")
+        df.groupby(["ruta", "lecturista", "ciclo"])
         .agg(
-            lecturista=("lecturista", "first"),
-            ciclo=("ciclo", "first"),
             total_suministros=("ruta", "count"),
             fise_obligatorio=("fise_es_1", "sum"),
             fotos_tomadas=("tiene_foto", "sum"),
@@ -430,10 +460,7 @@ def ejecutar_seguimiento_reparto():
     
     col1, col2 = st.columns(2)
 
-    # ----------------------------
-    # FILTROS DEPENDIENTES (CORREGIDO)
-    # ----------------------------
-
+   
     # ----------------------------
     # FILTROS DEPENDIENTES (CORRECTO LECTURISTA → CICLO)
     # ----------------------------
@@ -470,7 +497,6 @@ def ejecutar_seguimiento_reparto():
             df_tmp_lect = df_tmp
 
         lecturistas_filtrados = sorted(df_tmp_lect["lecturista"].dropna().unique())
-        ciclos_filtrados = sorted(df_tmp_ciclo["ciclo"].dropna().unique())
         
     with col1:
         st.multiselect("Lecturista", lecturistas_filtrados, key="filtro_lecturista")
@@ -497,23 +523,66 @@ def ejecutar_seguimiento_reparto():
         if df_monitoreo_total:
             df_monitoreo_total = pd.concat(df_monitoreo_total, ignore_index=True)            
             df_monitoreo_total.rename(columns={"repartidor": "lecturista"}, inplace=True)
+            
+            # 🔥 SIEMPRE recalcular fotos (SOLUCIÓN)
+            df_total = obtener_df_total(session, unidad, ids_ciclos, ciclos_dict)
 
+            if df_total is not None:
+
+                resumen = procesar_dataframe(df_total)
+
+                df_fotos_lecturista = (
+                    resumen.groupby(["lecturista", "ciclo"], as_index=False)
+                    .agg(total_fotos=("fotos_tomadas", "sum"))
+                )
+
+                st.session_state.resumen_fotos_lecturista = df_fotos_lecturista
+           
+
+            # -------------------------
+            # MAPEAR FOTOS
+            # -------------------------
+            df_fotos_lecturista = st.session_state.get("resumen_fotos_lecturista")
+
+            if df_fotos_lecturista is not None:
+
+                # 🔥 crear mapa directo (más estable)
+                foto_map = (
+                    df_fotos_lecturista
+                    .set_index(["lecturista", "ciclo"])["total_fotos"]
+                )
+
+                # 🔥 mapear con merge directo (evita errores de index)
+                df_monitoreo_total = df_monitoreo_total.merge(
+                    df_fotos_lecturista[["lecturista", "ciclo", "total_fotos"]],
+                    on=["lecturista", "ciclo"],
+                    how="left"
+                )
+
+                # renombrar directamente (evita columna extra problemática)
+                df_monitoreo_total.rename(columns={"total_fotos": "foto"}, inplace=True)
+
+                # limpiar valores
+                df_monitoreo_total["foto"] = pd.to_numeric(
+                    df_monitoreo_total["foto"],
+                    errors="coerce"
+                ).fillna(0)
+
+            else:
+                df_monitoreo_total["foto"] = 0
+                        
             # =========================
             # 🔥 CONSIGNADO 10% GENERAL (SIN columna extra de cálculo)
             # =========================
 
+            df_monitoreo_total["foto"] = pd.to_numeric(df_monitoreo_total["foto"], errors="coerce").fillna(0)
             df_monitoreo_total["asi"] = pd.to_numeric(df_monitoreo_total["asi"], errors="coerce").fillna(0)
-            df_monitoreo_total["entregado"] = pd.to_numeric(df_monitoreo_total["entregado"], errors="coerce").fillna(0)
 
-            df_monitoreo_total["consignado"] = df_monitoreo_total.apply(
-                lambda r: "----------"
-                if str(r["% avance"]).replace(" ", "").startswith("100")
-                else (
-                    "CUMPLIÓ EL 10% GENERAL"
-                    if r["entregado"] >= math.ceil(r["asi"] * 0.10)
-                    else "NO CUMPLIÓ EL 10% GENERAL"
-                ),
-                axis=1
+            
+            df_monitoreo_total["consignado"] = np.where(
+                df_monitoreo_total["foto"] >= np.ceil(df_monitoreo_total["asi"] * 0.10),
+                "CUMPLIÓ EL 10% GENERAL",
+                "NO CUMPLIÓ EL 10% GENERAL"
             )
 
             cols = df_monitoreo_total.columns.tolist()
@@ -522,6 +591,11 @@ def ejecutar_seguimiento_reparto():
                 cols.remove("ciclo")
                 idx = cols.index("lecturista")
                 cols.insert(idx, "ciclo")
+            
+            if "foto" in cols and "consignado" in cols:
+                cols.remove("foto")
+                idx = cols.index("consignado")
+                cols.insert(idx, "foto")
 
             df_monitoreo_total = df_monitoreo_total[cols]
             
@@ -530,25 +604,6 @@ def ejecutar_seguimiento_reparto():
             st.session_state.rutas_options = []  # aún no existen en monitoreo
             
             resetear_filtros()  # 👈 LIMPIA FILTROS
-
-            def limpiar_estado_unidad():
-                keys = [
-                    "ciclos",
-                    "monitoreo_df",
-                    "resumen_reparto",
-                    "lecturistas_options",
-                    "ciclos_options",
-                    "rutas_options",
-                    "filtro_lecturista",
-                    "filtro_ciclo",
-                    "filtro_ruta",
-                    "filtro_ruta_local",
-                    "filtro_fise_local",
-                    "filtro_consignado_local",
-                ]
-
-                for k in keys:
-                    st.session_state.pop(k, None)
 
             st.session_state.monitoreo_df = df_monitoreo_total
             
@@ -579,6 +634,7 @@ def ejecutar_seguimiento_reparto():
         # ----------------------------
         if "resumen_reparto" not in st.session_state:
 
+
             wbs = descargar_ciclos_excel(session, unidad, ids_ciclos)
 
             def procesar_wb(idc, wb):
@@ -606,12 +662,33 @@ def ejecutar_seguimiento_reparto():
                 st.error("No se pudo obtener datos de reportes")
                 return
 
-            df_total = pd.concat(dfs, ignore_index=True)
-            df_total = limpiar_dataframe(df_total)
+            df_total = obtener_df_total(session, unidad, ids_ciclos, ciclos_dict)
+
+            if df_total is None:
+                st.error("No se pudo obtener datos")
+                return
 
             resumen = procesar_dataframe(df_total)
-
             st.session_state.resumen_reparto = resumen
+
+            # =========================
+            # TOTAL FOTOS POR LECTURISTA
+            # =========================
+            df_fotos_lecturista = (
+                resumen.groupby("lecturista", as_index=False)
+                .agg(
+                    total_fotos=("fotos_tomadas", "sum"),
+                    total_suministros=("total_suministros", "sum"),
+                    fise_obligatorio=("fise_obligatorio", "sum"),   
+                    fise_con_foto=("fise_con_foto", "sum"),
+                )
+            )
+
+            df_fotos_lecturista["fise_sin_foto"] = (
+                df_fotos_lecturista["fise_obligatorio"] - df_fotos_lecturista["fise_con_foto"]
+            )
+
+            st.session_state.resumen_fotos_lecturista = df_fotos_lecturista
 
     # ----------------------------
     # FILTROS
@@ -775,10 +852,11 @@ def ejecutar_seguimiento_reparto():
         st.download_button("⬇ Descargar FISE", data=to_excel(df_fise), file_name="fise.xlsx")
 
         st.subheader("📊 Cumplimiento 10% Fotos")
+
         df_10 = df[
             ["lecturista","ciclo","ruta","total_suministros",
-             "fotos_tomadas","cant_min_foto","consignado"]
-        ]
-
+            "fotos_tomadas","cant_min_foto","consignado"]
+        ].copy()
+        
         st.dataframe(df_10, use_container_width=True)
         st.download_button("⬇ Descargar 10%", data=to_excel(df_10), file_name="cumplimiento_10.xlsx")

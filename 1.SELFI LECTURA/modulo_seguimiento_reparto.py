@@ -577,7 +577,20 @@ def ejecutar_seguimiento_reparto():
 
             df_monitoreo_total["foto"] = pd.to_numeric(df_monitoreo_total["foto"], errors="coerce").fillna(0)
             df_monitoreo_total["asi"] = pd.to_numeric(df_monitoreo_total["asi"], errors="coerce").fillna(0)
+            df_monitoreo_total["des"] = pd.to_numeric(df_monitoreo_total["des"], errors="coerce").fillna(0)
+            df_monitoreo_total["tiempo"] = df_monitoreo_total["tiempo"].astype(str)
 
+            df_monitoreo_total["tiempo"] = np.where(
+                df_monitoreo_total["tiempo"].str.contains("TT: 00:00:00", na=False),
+                "NO INICIÓ",
+                df_monitoreo_total["tiempo"]
+            )
+
+            df_monitoreo_total["des"] = np.where(
+                df_monitoreo_total["des"] == 0,
+                "NO DESCARGÓ",
+                df_monitoreo_total["des"]
+            )
             
             df_monitoreo_total["consignado"] = np.where(
                 df_monitoreo_total["foto"] >= np.ceil(df_monitoreo_total["asi"] * 0.10),

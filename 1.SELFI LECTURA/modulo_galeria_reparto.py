@@ -282,7 +282,7 @@ def ejecutar_galeria_reparto():
             )
 
             urls = [
-                (row["url"], str(row["suministro"]).strip(), row.get("lecturista", ""), row.get("idciclo"))
+                (row["url"], str(row["suministro"]).strip(), row.get("lecturista", ""), row.get("idciclo"), row.get("observacion", ""))
                 for _, row in df_filtrado.dropna(subset=["url"]).iterrows()
             ]
 
@@ -338,6 +338,7 @@ def ejecutar_galeria_reparto():
 
                 opciones_obs = [
                     "CORRECTO",
+                    "SOLO RECIBO/PUERTA",
                     "FOTOGRAFIA INCORRECTO/BORROSO/DESENFOCADO",
                     "SOLO RECIBO",
                     "SOLO SUMINISTRO",
@@ -345,7 +346,7 @@ def ejecutar_galeria_reparto():
                     "NI RECIBO/NI SUMINISTRO"
                 ]
 
-                for i, (url, suministro, lecturista, _) in enumerate(urls_pagina):
+                for i, (url, suministro, lecturista, _, observacion) in enumerate(urls_pagina):
 
                     if i % 5 == 0:
                         if i != 0:
@@ -356,17 +357,21 @@ def ejecutar_galeria_reparto():
 
                         st.image(url, use_container_width=True)
 
-                        st.markdown(f"<div style='text-align:center;font-size:13px'>{suministro}<br>{lecturista}</div>", unsafe_allow_html=True)
+                        obs = "" if pd.isna(observacion) else str(observacion)
+                                                
+                        st.markdown(f"<div style='text-align:center;font-size:13px'>"f"{suministro}<br>"f"{obs if obs else ''}<br>"f"{lecturista}"f"</div>",unsafe_allow_html=True)
 
                         st.markdown("<div style='text-align:center;font-weight:bold;'>Observaciones</div>", unsafe_allow_html=True)
 
                         clave = f"{pagina}_{suministro}"
-                        valor = st.session_state.observaciones.get(clave, "")
+                        valor = st.session_state.observaciones.get(clave, "CORRECTO")
+
+                        opciones = [""] + opciones_obs
 
                         seleccion = st.selectbox(
                             "",
-                            [""] + opciones_obs,
-                            index=([""] + opciones_obs).index(valor) if valor in opciones_obs else 0,
+                            opciones,
+                            index=opciones.index(valor) if valor in opciones else opciones.index("CORRECTO"),
                             key=f"obs_{clave}"
                         )
 

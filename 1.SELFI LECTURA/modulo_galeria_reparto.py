@@ -5,6 +5,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 import re
 from datetime import datetime
+from datetime import timedelta   
 
 # ----------------------------
 # UNIDADES
@@ -140,7 +141,7 @@ def ejecutar_galeria_reparto():
 
         if st.session_state.get("total_ciclos"):
             st.info(f"🔎 {st.session_state.total_ciclos} ciclos encontrados")
-
+        
         if st.button("📡 Obtener ciclos"):
 
             session.post(
@@ -213,13 +214,19 @@ def ejecutar_galeria_reparto():
                 st.session_state.render_token += 1  # 🔥 FIX
 
         df = st.session_state.df_galeria
-
+        
         if df is not None and "suministro" in df.columns:
-
-            colf1, colf2, colf3, colf4 = st.columns(4)
 
             df_base = df.copy()
 
+            # ✅ CREAR HORA UNA SOLA VEZ
+            if "fecha_ejecutado" in df_base.columns:
+                df_base["fecha_ejecutado"] = pd.to_datetime(df_base["fecha_ejecutado"], errors="coerce")                
+            else:
+                df_base["hora"] = None
+                        
+            colf1, colf2, colf3, colf4 = st.columns(4)
+            
             ciclo_visual = st.session_state.get("ciclo_visual", "Todos")
             if ciclo_visual != "Todos":
                 df_base = df_base[df_base["idciclo"] == ciclo_visual]
@@ -258,10 +265,49 @@ def ejecutar_galeria_reparto():
                 rutas = ["Todos"] + sorted(df_temp["ruta"].dropna().unique().tolist())
                 filtro_ruta = st.selectbox("Ruta", rutas, key="filtro_ruta")
 
-            with colf4:
+            with colf4:           
                 fotos_por_pagina = st.selectbox("Fotos por página", [50, 100, 200], index=1)
+            
+            # 🔥 APLICAR FILTROS ANTES DEL SLIDER
+            df_filtros = df_base.copy()
 
-            df_filtrado = df_base.copy()
+            if ciclo_visual != "Todos":
+                df_filtros = df_filtros[df_filtros["idciclo"] == ciclo_visual]
+
+            if filtro_lecturista != "Todos":
+                df_filtros = df_filtros[df_filtros["lecturista"] == filtro_lecturista]
+
+            if filtro_sector != "Todos":
+                df_filtros = df_filtros[df_filtros["sector"] == filtro_sector]
+
+            if filtro_ruta != "Todos":
+                df_filtros = df_filtros[df_filtros["ruta"] == filtro_ruta]
+
+            # 🔥 LIMPIAR FECHA SOLO AQUÍ
+            df_filtros["fecha_ejecutado"] = pd.to_datetime(df_filtros["fecha_ejecutado"], errors="coerce")
+            df_filtros = df_filtros.dropna(subset=["fecha_ejecutado"])
+
+            if df_filtros.empty:
+                st.warning("No hay datos con los filtros seleccionados")
+                return
+
+            df_filtros = df_filtros.sort_values("fecha_ejecutado")
+
+            # 🔥 RANGO REAL YA FILTRADO
+            fecha_min = df_filtros["fecha_ejecutado"].iloc[0]
+            fecha_max = df_filtros["fecha_ejecutado"].iloc[-1]
+
+            # 🔥 SLIDER CORRECTO
+            rango_fechas = st.slider(
+                "⏱ Línea de tiempo",
+                min_value=fecha_min.to_pydatetime(),
+                max_value=fecha_max.to_pydatetime(),
+                value=(fecha_min.to_pydatetime(), fecha_max.to_pydatetime()),
+                format="DD/MM HH:mm",
+                step=timedelta(minutes=1)
+            )
+
+            df_filtrado = df_filtros.copy()
 
             if filtro_lecturista != "Todos":
                 df_filtrado = df_filtrado[df_filtrado["lecturista"] == filtro_lecturista]
@@ -272,6 +318,13 @@ def ejecutar_galeria_reparto():
             if filtro_ruta != "Todos":
                 df_filtrado = df_filtrado[df_filtrado["ruta"] == filtro_ruta]
 
+            fecha_inicio, fecha_fin = rango_fechas
+
+            df_filtrado = df_filtrado[
+                (df_filtrado["fecha_ejecutado"] >= fecha_inicio) &
+                (df_filtrado["fecha_ejecutado"] <= fecha_fin)
+            ]
+            
             uunn = u["iduunn"]
 
             df_filtrado["url"] = df_filtrado.apply(

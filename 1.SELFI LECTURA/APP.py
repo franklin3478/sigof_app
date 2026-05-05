@@ -3,7 +3,7 @@ from modulo_selfie import ejecutar_selfie
 from modulo_fise import ejecutar_fise
 from modulo_galeria_reparto import ejecutar_galeria_reparto
 from modulo_galeria_lectura import ejecutar_galeria_lectura
-from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto  # 👈 NUEVO
+from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto 
 
 st.set_page_config(page_title="Sistema SIGOF", layout="wide")
 
@@ -78,5 +78,5 @@ else:
     elif opcion == "Galería Fotos Lectura":
         ejecutar_galeria_lectura()
 
-    elif opcion == "Seguimiento Reparto":  # 👈 NUEVO
+    elif opcion == "Seguimiento Reparto": 
         ejecutar_seguimiento_reparto()

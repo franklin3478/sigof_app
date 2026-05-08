@@ -416,7 +416,7 @@ def ejecutar_galeria_reparto():
 
                         st.markdown("<div style='text-align:center;font-weight:bold;'>Observaciones</div>", unsafe_allow_html=True)
 
-                        clave = f"{pagina}_{suministro}"
+                        clave = str(suministro)
                         valor = st.session_state.observaciones.get(clave, "CORRECTO")
 
                         opciones = [""] + opciones_obs

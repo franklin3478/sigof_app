@@ -219,9 +219,9 @@ def ejecutar_galeria_reparto():
 
             df_base = df.copy()
 
-            # ✅ CREAR HORA UNA SOLA VEZ
+            # ✅ CREAR HORA UNA SOLA VEZ            
             if "fecha_ejecutado" in df_base.columns:
-                df_base["fecha_ejecutado"] = pd.to_datetime(df_base["fecha_ejecutado"], errors="coerce")                
+                df_base["fecha_ejecutado"] = (pd.to_datetime(df_base["fecha_ejecutado"].astype(str).str.split(".").str[0],format="%Y-%m-%d %H:%M:%S",errors="coerce"))          
             else:
                 df_base["hora"] = None
                         
@@ -284,7 +284,7 @@ def ejecutar_galeria_reparto():
                 df_filtros = df_filtros[df_filtros["ruta"] == filtro_ruta]
 
             # 🔥 LIMPIAR FECHA SOLO AQUÍ
-            df_filtros["fecha_ejecutado"] = pd.to_datetime(df_filtros["fecha_ejecutado"], errors="coerce")
+            df_filtros["fecha_ejecutado"] = pd.to_datetime(df_filtros["fecha_ejecutado"], errors="coerce")            
             df_filtros = df_filtros.dropna(subset=["fecha_ejecutado"])
 
             if df_filtros.empty:

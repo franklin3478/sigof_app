@@ -111,7 +111,7 @@ def parsear_monitoreo(html):
         tiempo_raw = cols[11].get_text(" ", strip=True)
 
         match = re.search(
-            r"(HI:\s*\d{2}:\d{2}:\d{2}).*?(HF:\s*\d{2}:\d{2}:\d{2})",
+            r"(HI:\s*\d{2}:\d{2}:\d{2}).?(HF:\s\d{2}:\d{2}:\d{2})",
             tiempo_raw
         )
 
@@ -190,7 +190,7 @@ def obtener_monitoreo_sigof():
 
     with col1:
         unidad = st.selectbox("Unidad", list(mapa_unidades.keys()))
-
+    
     # 🔥 detectar cambio de unidad
     if st.session_state.get("unidad_actual") != unidad:
         st.session_state["unidad_actual"] = unidad
@@ -207,9 +207,9 @@ def obtener_monitoreo_sigof():
 
     with col2:
         if ciclos_dict:
-            ciclos_sel = st.multiselect("Ciclo", list(ciclos_dict.values()))
+            ciclos_sel = st.multiselect("Ciclo",list(ciclos_dict.values()))
         else:
-            ciclo_sel = None
+            ciclos_sel = None
 
     if not ciclos_dict or not ciclos_sel:
         st.info("Primero obtén ciclos")
@@ -220,7 +220,12 @@ def obtener_monitoreo_sigof():
     # ----------------------------
     # MONITOREO
     # ----------------------------
-    if st.button("📊 Obtener Monitoreo"):
+    mostrar_monitoreo = st.button("📊 Obtener Monitoreo")
+
+    if mostrar_monitoreo:
+        st.session_state["cargar_monitoreo"] = True
+
+    if st.session_state.get("cargar_monitoreo", False):
 
         dfs = []
 
@@ -245,8 +250,20 @@ def obtener_monitoreo_sigof():
             return None
 
         df_final = pd.concat(dfs, ignore_index=True)
+
+        # Guardar completo para cálculos internos
         st.session_state.df_final = df_final
-        st.dataframe(df_final)
+
+        # Mostrar sin ID
+        df_mostrar = df_final.drop(
+            columns=["id_repartidor"],
+            errors="ignore"
+        )
+
+        st.dataframe(
+            df_mostrar,
+            use_container_width=True
+        )
 
         # 🔥 AQUÍ VA TODO LO NUEVO
         
@@ -286,23 +303,111 @@ def obtener_monitoreo_sigof():
             [(k, len(v)) for k, v in resultado.items()],
             columns=["Repartidor", "Cantidad puntos rojos"]
         )
-
+        
         st.dataframe(df_debug, use_container_width=True)
 
-        df_excel = pd.DataFrame({k: pd.Series(list(v)) for k, v in resultado.items()})
+        total_rojos = sum(len(v) for v in resultado.values())
 
-        from io import BytesIO
+        st.subheader("🔴 Resumen general")
 
-        buffer = BytesIO()
-        df_excel.to_excel(buffer, index=False)
-        buffer.seek(0)
+        st.info(f"Se encontraron {total_rojos} suministros pendientes de validación")
 
-        st.download_button(
-            "📥 Descargar Excel (Puntos Rojos)",
-            buffer,
-            file_name="reporte_rojos.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.subheader("🧪 Prueba de validación")
+
+        todos_rojos = []
+
+        for repartidor, suministros in resultado.items():
+
+            for suministro in suministros:
+
+                todos_rojos.append(
+                    f"{suministro} | {repartidor}"
+                )
+
+        if todos_rojos:
+
+            suministro_sel = st.selectbox(
+                "Seleccione un suministro rojo",
+                todos_rojos
+            )
+
+            if st.button("Validar suministro seleccionado"):
+
+                suministro = suministro_sel.split("|")[0].strip()
+
+                resultado_prueba = validar_suministro(
+                    session,
+                    unidad,
+                    suministro
+                )
+
+                st.json(resultado_prueba)
+
+        else:
+
+            st.warning("No se encontraron puntos rojos")
+        
+        # ===================================
+        # BOTÓN VALIDACIÓN MASIVA
+        # ===================================
+
+        if st.button(
+                "✅ Validar automáticamente puntos rojos"
+        ):
+
+            progreso = st.progress(0)
+
+            resultados = []
+
+            total = sum(
+                len(v)
+                for v in resultado.values()
+            )
+
+            contador = 0
+
+            for repartidor, suministros in resultado.items():
+
+                # PRUEBA SOLO 1
+                for suministro in list(suministros):
+
+                    ok = validar_suministro(
+                        session,
+                        unidad,
+                        suministro
+                    )
+
+                    resultados.append({
+
+                        "repartidor":
+                            repartidor,
+
+                        "suministro":
+                            suministro,
+
+                        "estado":
+                            "VALIDADO"
+                            if ok
+                            else "ERROR"
+
+                    })
+
+                    contador += 1
+
+                    progreso.progress(
+                        contador / total
+                    )
+
+            df_val = pd.DataFrame(
+                resultados
+            )
+
+            st.dataframe(df_val)
+
+            st.success(
+                "Proceso terminado"
+            )
+
 # ----------------------------
 # WRAPPER PARA APP PRINCIPAL
 # ----------------------------
@@ -314,6 +419,7 @@ def ejecutar_fise():
     if df is not None:
         st.success("Datos obtenidos correctamente")
         st.dataframe(df, use_container_width=True)
+      
 
 def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repartidor):
 
@@ -339,7 +445,7 @@ def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repart
             params=params,
             headers={
                 "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, */*; q=0.01"
+                "Accept": "application/json, text/javascript, /; q=0.01"
             },
             timeout=30
         )
@@ -350,15 +456,16 @@ def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repart
             return rojos
 
         filas = data.get("aaData", [])
-
+        
         if not filas:
             break
 
         # 🔴 PROCESAR FILAS
         for fila in filas:
+           
             if len(fila) < 6:
                 continue
-
+            
             col_r = fila[5].lower()
 
             if (
@@ -367,8 +474,14 @@ def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repart
                 "fa-times" in col_r or
                 "no entregado" in col_r
             ):
-                suministro = fila[1]
-                rojos.append(suministro)
+                match = re.search(
+                    r'val_suministro\s*=\s*"(\d+)"',
+                    fila[7]
+                )
+
+                if match:
+                    suministro = match.group(1)
+                    rojos.append(suministro)
         
         start += length
 
@@ -376,3 +489,45 @@ def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repart
         if start >= int(data.get("iTotalRecords", 0)):
             break
     return rojos
+
+# ----------------------------
+# VALIDAR SUMINISTRO (ROJO → VERDE)
+# ----------------------------
+def validar_suministro(
+        session,
+        unidad,
+        suministro
+):
+
+    cambiar_unidad(session, unidad)
+
+    url = (
+        "http://sigof.distriluz.com.pe"
+        "/plus/ComrepOrdenrepartos/"
+        f"ajax_save_entrega_reparto_si/{suministro}"
+    )
+
+    try:
+
+        r = session.post(
+            url,
+            headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/javascript, /; q=0.01"
+            },
+            timeout=30
+        )
+
+        return {
+            "status_code": r.status_code,
+            "respuesta": r.text,
+            "url": url
+        }
+
+    except Exception as e:
+
+        return {
+            "status_code": "ERROR",
+            "respuesta": str(e),
+            "url": url
+        }

@@ -593,7 +593,11 @@ def ejecutar_seguimiento_reparto():
             )
             
             df_monitoreo_total["consignado"] = np.where(
-                df_monitoreo_total["foto"] >= np.ceil(df_monitoreo_total["asi"] * 0.10),
+                df_monitoreo_total["foto"] >= np.where(
+                    df_monitoreo_total["asi"] < 10,
+                    1,
+                    np.floor(df_monitoreo_total["asi"] * 0.10)
+                ),
                 "CUMPLIÓ EL 10% GENERAL",
                 "NO CUMPLIÓ EL 10% GENERAL"
             )

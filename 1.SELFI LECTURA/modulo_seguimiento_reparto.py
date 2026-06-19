@@ -10,6 +10,8 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 import math
 import numpy as np
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 def limpiar_datos_unidad():
     keys_a_limpiar = [
@@ -125,30 +127,21 @@ def parsear_monitoreo(html):
         cols = fila.find_all("td")
         if len(cols) < 18:
             continue
-
-        tiempo_raw = cols[11].get_text(" ", strip=True)
-
-        match = re.search(
-            r"(HI:\s*\d{2}:\d{2}:\d{2}).?(HF:\s\d{2}:\d{2}:\d{2})",
-            tiempo_raw
-        )
-
-        if match:
-            tiempo_limpio = f"{match.group(1)} / {match.group(2)}"
-        else:
-            tiempo_limpio = tiempo_raw
-
+        
         avance_raw = cols[14].get_text(strip=True)
         avance_raw = re.sub(r"\s+", "", avance_raw)
 
+        match_avance = re.search(r"(\d+)%", avance_raw)
+        if match_avance:
+            avance_raw = f"{match_avance.group(1)}%"
+
         data.append({
             "repartidor": cols[8].get_text(strip=True),
-            "asi": cols[9].get_text(strip=True),
-            "des": cols[10].get_text(strip=True),
-            "tiempo": tiempo_limpio,
-            "fin": cols[12].get_text(strip=True),
-            "p": cols[13].get_text(strip=True),
+            "asignado": cols[9].get_text(strip=True),
+            "descarga": cols[10].get_text(strip=True),
             "% avance": avance_raw,
+            "fin": cols[12].get_text(strip=True),
+            "pendiente": cols[13].get_text(strip=True),
             "entregado": cols[16].get_text(strip=True),
             "paso_ruta": cols[17].get_text(strip=True),
         })
@@ -340,6 +333,62 @@ def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False)
+    return output.getvalue()
+
+def to_excel_unificado(df_monitoreo, df_fise, df_10):
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+
+        hojas = {
+            "Monitoreo": df_monitoreo,
+            "FISE": df_fise,
+            "Cumplimiento": df_10
+        }
+
+        for nombre_hoja, df in hojas.items():
+
+            df.to_excel(
+                writer,
+                sheet_name=nombre_hoja,
+                index=False
+            )
+
+            ws = writer.sheets[nombre_hoja]
+
+            # Encabezado en negrita
+            for cell in ws[1]:
+
+                # Convertir encabezado a MAYÚSCULAS
+                if cell.value:
+                    cell.value = str(cell.value).upper()
+
+                # Letra blanca y negrita
+                cell.font = Font(
+                    bold=True,
+                    color="FFFFFF"
+                )
+
+                # Fondo azul corporativo
+                cell.fill = PatternFill(
+                    fill_type="solid",
+                    start_color="4472C4",
+                    end_color="4472C4"
+                )
+            for column in ws.columns:
+
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+
+                for cell in column:
+                    try:
+                        if cell.value is not None:
+                            max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+
+                ws.column_dimensions[column_letter].width = max_length + 4
+
     return output.getvalue()
 
 def aplicar_filtros_global(df):
@@ -576,27 +625,27 @@ def ejecutar_seguimiento_reparto():
             # =========================
 
             df_monitoreo_total["foto"] = pd.to_numeric(df_monitoreo_total["foto"], errors="coerce").fillna(0)
-            df_monitoreo_total["asi"] = pd.to_numeric(df_monitoreo_total["asi"], errors="coerce").fillna(0)
-            df_monitoreo_total["des"] = pd.to_numeric(df_monitoreo_total["des"], errors="coerce").fillna(0)
-            df_monitoreo_total["tiempo"] = df_monitoreo_total["tiempo"].astype(str)
+            df_monitoreo_total["asignado"] = pd.to_numeric(df_monitoreo_total["asignado"], errors="coerce").fillna(0)
+            df_monitoreo_total["descarga"] = pd.to_numeric(df_monitoreo_total["descarga"], errors="coerce").fillna(0)
+            df_monitoreo_total["% avance"] = df_monitoreo_total["% avance"].astype(str)
 
-            df_monitoreo_total["tiempo"] = np.where(
-                df_monitoreo_total["tiempo"].str.contains("TT: 00:00:00", na=False),
+            df_monitoreo_total["% avance"] = np.where(
+                df_monitoreo_total["% avance"].isin(["0%", "0 %", "0"]),
                 "NO INICIÓ",
-                df_monitoreo_total["tiempo"]
+                df_monitoreo_total["% avance"]
             )
-
-            df_monitoreo_total["des"] = np.where(
-                df_monitoreo_total["des"] == 0,
+           
+            df_monitoreo_total["descarga"] = np.where(
+                df_monitoreo_total["descarga"] == 0,
                 "NO DESCARGÓ",
-                df_monitoreo_total["des"]
+                df_monitoreo_total["descarga"]
             )
             
             df_monitoreo_total["consignado"] = np.where(
                 df_monitoreo_total["foto"] >= np.where(
-                    df_monitoreo_total["asi"] < 10,
+                    df_monitoreo_total["asignado"] < 10,
                     1,
-                    np.floor(df_monitoreo_total["asi"] * 0.10)
+                    np.floor(df_monitoreo_total["asignado"] * 0.10)
                 ),
                 "CUMPLIÓ EL 10% GENERAL",
                 "NO CUMPLIÓ EL 10% GENERAL"
@@ -637,15 +686,9 @@ def ejecutar_seguimiento_reparto():
 
         df_mon = st.session_state.monitoreo_df.copy()
         df_mon = aplicar_filtros_global(df_mon)
-
+                
         st.dataframe(df_mon, use_container_width=True)
-
-        st.download_button(
-            "⬇ Descargar Monitoreo",
-            data=to_excel(df_mon),
-            file_name="monitoreo.xlsx"
-        )
-            
+                   
         # ----------------------------
         # PROCESAR EXCEL SOLO AQUÍ
         # ----------------------------
@@ -866,8 +909,7 @@ def ejecutar_seguimiento_reparto():
         ]
 
         st.dataframe(df_fise, use_container_width=True)
-        st.download_button("⬇ Descargar FISE", data=to_excel(df_fise), file_name="fise.xlsx")
-
+        
         st.subheader("📊 Cumplimiento 10% Fotos")
 
         df_10 = df[
@@ -876,4 +918,17 @@ def ejecutar_seguimiento_reparto():
         ].copy()
         
         st.dataframe(df_10, use_container_width=True)
-        st.download_button("⬇ Descargar 10%", data=to_excel(df_10), file_name="cumplimiento_10.xlsx")
+        
+        archivo_excel = to_excel_unificado(
+            df_mon,
+            df_fise,
+            df_10
+        )
+
+        st.download_button(
+            "⬇ Descargar Reporte Completo",
+            data=archivo_excel,
+            file_name="seguimiento_reparto.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        

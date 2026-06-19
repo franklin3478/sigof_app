@@ -140,7 +140,7 @@ def parsear_monitoreo(html):
             "asignado": cols[9].get_text(strip=True),
             "descarga": cols[10].get_text(strip=True),
             "% avance": avance_raw,
-            "fin": cols[12].get_text(strip=True),
+            "finalizado": cols[12].get_text(strip=True),
             "pendiente": cols[13].get_text(strip=True),
             "entregado": cols[16].get_text(strip=True),
             "paso_ruta": cols[17].get_text(strip=True),

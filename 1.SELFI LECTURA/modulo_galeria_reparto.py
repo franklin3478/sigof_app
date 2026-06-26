@@ -142,7 +142,7 @@ def ejecutar_galeria_reparto():
         if st.session_state.get("total_ciclos"):
             st.info(f"🔎 {st.session_state.total_ciclos} ciclos encontrados")
         
-        if st.button("📡 Obtener ciclos"):
+        if st.button("📡 PRIMERO OBTEN CICLOS"):
 
             session.post(
                 "http://sigof.distriluz.com.pe/plus/usuario/ajax_cambiar_sesion",
@@ -191,7 +191,7 @@ def ejecutar_galeria_reparto():
 
             return None
 
-        if ciclos_ids and st.button("📥 Descargar datos"):
+        if ciclos_ids and st.button("📥 DESCARGAR FOTOGRAFIAS"):
 
             dfs = []
 
@@ -417,14 +417,14 @@ def ejecutar_galeria_reparto():
                         st.markdown("<div style='text-align:center;font-weight:bold;'>Observaciones</div>", unsafe_allow_html=True)
 
                         clave = str(suministro)
-                        valor = st.session_state.observaciones.get(clave, "CORRECTO")
+                        valor = st.session_state.observaciones.get(clave, "")
 
                         opciones = [""] + opciones_obs
 
                         seleccion = st.selectbox(
                             "",
                             opciones,
-                            index=opciones.index(valor) if valor in opciones else opciones.index("CORRECTO"),
+                            index=opciones.index(valor) if valor in opciones else 0,
                             key=f"obs_{clave}"
                         )
 
@@ -448,7 +448,7 @@ def ejecutar_galeria_reparto():
 
             # 📥 Descarga directa (1 solo botón, sin pasos extra)
             st.download_button(
-                "📥 Descargar Excel con observaciones",
+                "📥 Descargar Excel",
                 data=output.getvalue(),
                 file_name="SIGOF_reporte.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

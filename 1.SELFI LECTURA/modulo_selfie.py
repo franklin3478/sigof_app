@@ -340,7 +340,7 @@ def ejecutar_selfie():
 
             wb.save(output)
             st.download_button(
-                "📥 Descargar Excel",
+                "📥 Descargar Selfis",
                 data=output.getvalue(),
                 file_name="Reporte_Selfie.xlsx"
             )

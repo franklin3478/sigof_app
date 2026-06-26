@@ -131,7 +131,7 @@ def parsear_monitoreo(html):
         avance_raw = cols[14].get_text(strip=True)
         avance_raw = re.sub(r"\s+", "", avance_raw)
 
-        match_avance = re.search(r"(\d+)%", avance_raw)
+        match_avance = re.search(r"(\d+(?:\.\d+)?)%", avance_raw)
         if match_avance:
             avance_raw = f"{match_avance.group(1)}%"
 

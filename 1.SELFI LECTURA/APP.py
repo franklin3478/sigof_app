@@ -57,7 +57,7 @@ else:
     opcion = st.sidebar.selectbox(
         "Selecciona módulo",
         [
-            "Selfie Lectura",
+            "Selfie Lectura/Reparto",
             "Validación FISE",
             "Galería Fotos Reparto",
             "Galería Fotos Lectura",
@@ -66,7 +66,7 @@ else:
     )
 
     # NAVEGACIÓN
-    if opcion == "Selfie Lectura":
+    if opcion == "Selfie Lectura/Reparto":
         ejecutar_selfie()
 
     elif opcion == "Validación FISE":

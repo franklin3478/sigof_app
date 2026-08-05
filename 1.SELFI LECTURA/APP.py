@@ -4,9 +4,6 @@ from modulo_fise import ejecutar_fise
 from modulo_galeria_reparto import ejecutar_galeria_reparto
 from modulo_galeria_lectura import ejecutar_galeria_lectura
 from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto
-import streamlit as st
-
-st.write("VERSION PRUEBA STREAMLIT CLOUD 05-08-2026")
 
 st.set_page_config(page_title="Sistema SIGOF", layout="wide")
 

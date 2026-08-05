@@ -408,11 +408,7 @@ def ejecutar_galeria_reparto():
 
                     with cols[i % 5]:
 
-                        st.image(
-                            url,
-                            use_container_width=True,
-                            key=f"img_{render_id}_{suministro}_{i}"
-                        )
+                        st.image(url, use_container_width=True)
 
                         obs = "" if pd.isna(observacion) else str(observacion)
                                                 

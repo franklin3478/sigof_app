@@ -4,6 +4,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ----------------------------
 # UNIDADES (COMPLETO)
@@ -254,34 +255,76 @@ def obtener_monitoreo_sigof():
         # Guardar completo para cálculos internos
         st.session_state.df_final = df_final
 
-        # Mostrar sin ID
-        df_mostrar = df_final.drop(
+        # ----------------------------
+        # FILTRO POR LECTURISTA
+        # ----------------------------
+        lecturistas = sorted(
+            df_final["repartidor"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+
+        lecturistas = sorted(
+            df_final["repartidor"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+
+        lecturistas_sel = st.multiselect(
+            "👤 Lecturista",
+            lecturistas,
+            placeholder="Seleccione uno o varios lecturistas"
+        )
+
+        if lecturistas_sel:
+
+            df_filtrado = df_final[
+                df_final["repartidor"].astype(str).isin(lecturistas_sel)
+            ].copy()
+
+        else:
+
+            # Si no selecciona ninguno → TODOS
+            df_filtrado = df_final.copy()
+
+        # ----------------------------
+        # MOSTRAR TABLA SEGÚN FILTRO
+        # ----------------------------
+
+        df_mostrar = df_filtrado.drop(
             columns=["id_repartidor"],
             errors="ignore"
         )
 
         st.dataframe(
             df_mostrar,
-            use_container_width=True
+            use_container_width=True,
+            hide_index=True
         )
 
         # 🔥 AQUÍ VA TODO LO NUEVO
         
         resultado = {}
+        resultado_fise = {}
 
         iduunn = mapa_unidades[unidad]["iduunn"]
 
-        for _, row in st.session_state.df_final.iterrows():
+        for _, row in df_filtrado.iterrows():
+
             nombre = row["repartidor"]
             id_rep = row["id_repartidor"]
             ciclo_txt = row["ciclo"]
 
-            # 🔑 clave única (evita problemas de nombres repetidos)
             clave = f"{id_rep} - {nombre}"
 
-            idciclo = [k for k, v in ciclos_dict.items() if v == ciclo_txt][0]
+            idciclo = [
+                k for k, v in ciclos_dict.items()
+                if v == ciclo_txt
+            ][0]
 
-            suministros = obtener_suministros_rojos(
+            suministros, fise_suministros = obtener_suministros_rojos(
                 session,
                 unidad,
                 fecha,
@@ -290,123 +333,375 @@ def obtener_monitoreo_sigof():
                 id_rep
             )
 
-            # 🔥 usar SET para evitar duplicados entre ciclos
+            # =====================================
+            # TODOS LOS PUNTOS ROJOS
+            # =====================================
+
             if clave not in resultado:
                 resultado[clave] = set()
 
             resultado[clave].update(suministros)
 
-        # 🔥 convertir a conteo real (sin duplicados)
-        st.subheader("🔴 Resumen de puntos rojos por repartidor")
+            # =====================================
+            # SOLO FISE ROJOS
+            # =====================================
 
-        df_debug = pd.DataFrame(
-            [(k, len(v)) for k, v in resultado.items()],
-            columns=["Repartidor", "Cantidad puntos rojos"]
+            if clave not in resultado_fise:
+                resultado_fise[clave] = set()
+
+            resultado_fise[clave].update(fise_suministros)
+
+        # ===================================
+        # RESÚMENES
+        # ===================================
+
+        total_rojos = sum(
+            len(suministros)
+            for suministros in resultado.values()
         )
-        
-        st.dataframe(df_debug, use_container_width=True)
 
-        total_rojos = sum(len(v) for v in resultado.values())
+        total_fise = sum(
+            len(suministros)
+            for suministros in resultado_fise.values()
+        )
 
-        st.subheader("🔴 Resumen general")
+        col_fise, col_general = st.columns(2)
 
-        st.info(f"Se encontraron {total_rojos} suministros pendientes de validación")
 
-        st.subheader("🧪 Prueba de validación")
+        # ===================================
+        # RESUMEN FISE
+        # ===================================
 
-        todos_rojos = []
+        with col_fise:
 
-        for repartidor, suministros in resultado.items():
+            # ===================================
+            # RESUMEN FISE
+            # ===================================
 
-            for suministro in suministros:
+            st.subheader("🔥 FISE pendientes")
 
-                todos_rojos.append(
-                    f"{suministro} | {repartidor}"
+            if total_fise == 0:
+
+                st.warning(
+                    "No se encontraron FISE pendientes de entrega"
                 )
 
-        if todos_rojos:
+            else:
 
-            suministro_sel = st.selectbox(
-                "Seleccione un suministro rojo",
-                todos_rojos
-            )
-
-            if st.button("Validar suministro seleccionado"):
-
-                suministro = suministro_sel.split("|")[0].strip()
-
-                resultado_prueba = validar_suministro(
-                    session,
-                    unidad,
-                    suministro
+                # Resumen general siempre visible
+                st.info(
+                    f"🔥 Se encontraron {total_fise} FISE pendientes de entrega"
                 )
 
-                st.json(resultado_prueba)
+                # Lista desplegable
+                with st.expander(
+                    f"➕ Ver detalle de FISE pendientes ({total_fise})"
+                ):
+
+                    df_fise_debug = pd.DataFrame(
+                        [
+                            (repartidor, len(suministros))
+                            for repartidor, suministros in resultado_fise.items()
+                            if len(suministros) > 0
+                        ],
+                        columns=[
+                            "Repartidor",
+                            "Cantidad FISE pendientes"
+                        ]
+                    )
+
+                    st.dataframe(
+                        df_fise_debug,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+        # ===================================
+        # RESUMEN GENERAL
+        # ===================================
+
+        with col_general:
+
+            st.subheader("🔴 Resumen general")
+
+            st.info(
+                f"Se encontraron {total_rojos} "
+                f"suministros pendientes de validación"
+            )     
+                        
+        # ===================================
+        # VALIDACIÓN MASIVA
+        # ===================================
+
+        st.subheader("⚙️ Validación automática")
+
+        opcion_validacion = st.radio(
+            "¿Qué deseas validar?",
+            [
+                "🔴 Todos los pendientes",
+                "🔥 Solo FISE pendientes",
+                "🔵 Pendientes excepto FISE"
+            ],
+            horizontal=True
+        )
+
+
+        # ===================================
+        # DETERMINAR QUÉ SUMINISTROS VALIDAR
+        # ===================================
+
+        if opcion_validacion == "🔴 Todos los pendientes":
+
+            # Todos los puntos rojos
+            # Incluye FISE y NO FISE
+            datos_validar = resultado
+
+
+        elif opcion_validacion == "🔥 Solo FISE pendientes":
+
+            # Solamente FISE que están rojos
+            datos_validar = resultado_fise
+
 
         else:
 
-            st.warning("No se encontraron puntos rojos")
-        
-        # ===================================
-        # BOTÓN VALIDACIÓN MASIVA
-        # ===================================
+            # ===================================
+            # ROJOS EXCEPTO FISE
+            # ===================================
 
-        if st.button(
-                "✅ Validar automáticamente puntos rojos"
-        ):
-
-            progreso = st.progress(0)
-
-            resultados = []
-
-            total = sum(
-                len(v)
-                for v in resultado.values()
-            )
-
-            contador = 0
+            datos_validar = {}
 
             for repartidor, suministros in resultado.items():
 
-                # PRUEBA SOLO 1
-                for suministro in list(suministros):
+                fises = resultado_fise.get(
+                    repartidor,
+                    set()
+                )
 
-                    ok = validar_suministro(
-                        session,
-                        unidad,
-                        suministro
-                    )
+                # Todos los rojos menos los FISE
+                no_fise = suministros - fises
 
-                    resultados.append({
+                if no_fise:
+                    datos_validar[repartidor] = no_fise
 
-                        "repartidor":
+
+        # ===================================
+        # TOTAL A VALIDAR
+        # ===================================
+
+        total_validar = sum(
+            len(suministros)
+            for suministros in datos_validar.values()
+        )
+
+
+        # ===================================
+        # MOSTRAR CANTIDAD
+        # ===================================
+
+        if total_validar == 0:
+
+            if opcion_validacion == "🔴 Todos los pendientes":
+
+                st.warning(
+                    "No existen pendientes para validar."
+                )
+
+            elif opcion_validacion == "🔥 Solo FISE pendientes":
+
+                st.warning(
+                    "No existen FISES pendientes para validar."
+                )
+
+            else:
+
+                st.warning(
+                    "No existen pendientes que no sean FISE."
+                )
+
+        else:
+
+            st.info(
+                f"Se encontraron {total_validar} suministros "
+                f"para validar."
+            )
+
+
+            # ===================================
+            # BOTÓN EJECUTAR
+            # ===================================
+
+            if st.button(
+                "✅ Validar seleccionados",
+                key="btn_validacion_masiva"
+            ):
+
+                # ---------------------------------
+                # ASEGURAR UNIDAD CORRECTA
+                # ---------------------------------
+
+                cambiar_unidad(session, unidad)
+
+                # ---------------------------------
+                # CREAR LISTA DE TRABAJO
+                # ---------------------------------
+
+                tareas = []
+
+                for repartidor, suministros in datos_validar.items():
+
+                    for suministro in suministros:
+
+                        tareas.append(
+                            (repartidor, suministro)
+                        )
+
+                total_validar = len(tareas)
+
+                progreso = st.progress(0)
+
+                resultados_validacion = []
+
+                # ---------------------------------
+                # VALIDACIÓN EN PARALELO
+                # ---------------------------------
+
+                with ThreadPoolExecutor(
+                    max_workers=5
+                ) as executor:
+
+                    futuros = {
+                        executor.submit(
+                            validar_suministro,
+                            session,
+                            suministro
+                        ): (
                             repartidor,
+                            suministro
+                        )
+                        for repartidor, suministro in tareas
+                    }
 
-                        "suministro":
-                            suministro,
+                    # ---------------------------------
+                    # RECIBIR RESULTADOS
+                    # ---------------------------------
 
-                        "estado":
-                            "VALIDADO"
-                            if ok
-                            else "ERROR"
+                    for contador, futuro in enumerate(
+                        as_completed(futuros),
+                        start=1
+                    ):
 
-                    })
+                        repartidor, suministro = futuros[futuro]
 
-                    contador += 1
+                        try:
 
-                    progreso.progress(
-                        contador / total
-                    )
+                            respuesta = futuro.result()
 
-            df_val = pd.DataFrame(
-                resultados
-            )
+                            # ---------------------------------
+                            # RESPUESTA SIGOF
+                            # ---------------------------------
 
-            st.dataframe(df_val)
+                            if isinstance(respuesta, dict):
 
-            st.success(
-                "Proceso terminado"
-            )
+                                status_code = respuesta.get(
+                                    "status_code"
+                                )
+
+                                if status_code == 200:
+                                    estado = "VALIDADO"
+                                else:
+                                    estado = "ERROR"
+
+                            else:
+
+                                estado = (
+                                    "VALIDADO"
+                                    if respuesta
+                                    else "ERROR"
+                                )
+
+                        except Exception:
+
+                            estado = "ERROR"
+
+                        # ---------------------------------
+                        # TIPO FISE
+                        # ---------------------------------
+
+                        es_fise = (
+                            suministro
+                            in resultado_fise.get(
+                                repartidor,
+                                set()
+                            )
+                        )
+
+                        # ---------------------------------
+                        # GUARDAR RESULTADO
+                        # ---------------------------------
+
+                        resultados_validacion.append({
+
+                            "Repartidor": repartidor,
+
+                            "Suministro": suministro,
+
+                            "Tipo": (
+                                "FISE"
+                                if es_fise
+                                else "NO FISE"
+                            ),
+
+                            "Estado": estado
+                        })
+
+                        # ---------------------------------
+                        # PROGRESO
+                        # ---------------------------------
+
+                        progreso.progress(
+                            contador / total_validar
+                        )
+
+                # ===================================
+                # RESULTADO FINAL
+                # ===================================
+
+                df_val = pd.DataFrame(
+                    resultados_validacion
+                )
+
+                st.subheader(
+                    "📋 Resultado de la validación"
+                )
+
+                st.dataframe(
+                    df_val,
+                    use_container_width=True
+                )
+
+
+                # ===================================
+                # RESUMEN
+                # ===================================
+
+                cantidad_validos = (
+                    df_val["Estado"]
+                    .eq("VALIDADO")
+                    .sum()
+                )
+
+                cantidad_error = (
+                    df_val["Estado"]
+                    .eq("ERROR")
+                    .sum()
+                )
+
+                st.success(
+                    f"Proceso terminado. "
+                    f"Validados: {cantidad_validos} | "
+                    f"Errores: {cantidad_error}"
+                )
 
 # ----------------------------
 # WRAPPER PARA APP PRINCIPAL
@@ -421,15 +716,29 @@ def ejecutar_fise():
         st.dataframe(df, use_container_width=True)
       
 
-def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repartidor):
+def obtener_suministros_rojos(
+    session,
+    unidad,
+    fecha,
+    iduunn,
+    idciclo,
+    id_repartidor
+):
 
     cambiar_unidad(session, unidad)
 
-    url = f"http://sigof.distriluz.com.pe/plus/ComrepOrdenrepartos/ajax_evaluar_repartointro/U,L/{fecha}/{fecha}/{iduunn}/{idciclo}/0/0/{id_repartidor}/0/0/0/0/0"
+    url = (
+        f"http://sigof.distriluz.com.pe/plus/"
+        f"ComrepOrdenrepartos/ajax_evaluar_repartointro/"
+        f"U,L/{fecha}/{fecha}/{iduunn}/{idciclo}/0/0/"
+        f"{id_repartidor}/0/0/0/0/0"
+    )
 
     rojos = []
+    fise_rojos = []
+
     start = 0
-    length = 1000  
+    length = 1000
 
     while True:
 
@@ -445,61 +754,105 @@ def obtener_suministros_rojos(session, unidad, fecha, iduunn, idciclo, id_repart
             params=params,
             headers={
                 "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, /; q=0.01"
+                "Accept": "application/json, text/javascript, */*; q=0.01"
             },
             timeout=30
         )
 
         try:
             data = r.json()
-        except:
-            return rojos
+        except Exception:
+            return rojos, fise_rojos
 
         filas = data.get("aaData", [])
-        
+
         if not filas:
             break
 
-        # 🔴 PROCESAR FILAS
         for fila in filas:
-           
-            if len(fila) < 6:
-                continue
-            
-            col_r = fila[5].lower()
 
-            if (
-                "color-danger" in col_r or
-                "text-danger" in col_r or
-                "fa-times" in col_r or
-                "no entregado" in col_r
-            ):
+            if len(fila) < 8:
+                continue
+
+            # ==========================================
+            # COLUMNA R = RESULTADO EVALUACIÓN
+            # ==========================================
+
+            col_r = str(fila[5]).lower()
+
+            es_rojo = (
+                "color-danger" in col_r
+                or "text-danger" in col_r
+                or "fa-times" in col_r
+                or "no entregado" in col_r
+            )
+
+            # ==========================================
+            # COLUMNA T = TIPO DE REPARTO
+            # ==========================================
+
+            col_t = str(fila[6])
+
+            soup_t = BeautifulSoup(
+                col_t,
+                "html.parser"
+            )
+
+            tipo_reparto = soup_t.get_text(
+                " ",
+                strip=True
+            ).upper()
+
+            # Detectamos FISE de dos maneras:
+            # 1. El contenido sea F
+            # 2. El span tenga title="Fise"
+
+            es_fise = (
+                tipo_reparto == "F"
+                or 'title="Fise"' in col_t
+                or "title='Fise'" in col_t
+            )
+
+            # ==========================================
+            # SOLO PROCESAMOS LOS ROJOS
+            # ==========================================
+
+            if es_rojo:
+
                 match = re.search(
                     r'val_suministro\s*=\s*"(\d+)"',
-                    fila[7]
+                    str(fila[7])
                 )
 
                 if match:
+
                     suministro = match.group(1)
+
+                    # TODOS LOS ROJOS
                     rojos.append(suministro)
-        
+
+                    # ROJO + FISE
+                    if es_fise:
+                        fise_rojos.append(suministro)
+
         start += length
 
-        # 🔥 cortar si ya no hay más
-        if start >= int(data.get("iTotalRecords", 0)):
+        total_registros = int(
+            data.get("iTotalRecords", 0)
+        )
+
+        if start >= total_registros:
             break
-    return rojos
+
+    return rojos, fise_rojos
 
 # ----------------------------
 # VALIDAR SUMINISTRO (ROJO → VERDE)
 # ----------------------------
 def validar_suministro(
-        session,
-        unidad,
-        suministro
+    session,
+    suministro
 ):
-
-    cambiar_unidad(session, unidad)
 
     url = (
         "http://sigof.distriluz.com.pe"
@@ -513,7 +866,7 @@ def validar_suministro(
             url,
             headers={
                 "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, /; q=0.01"
+                "Accept": "application/json, text/javascript, */*; q=0.01"
             },
             timeout=30
         )

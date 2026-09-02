@@ -957,21 +957,26 @@ def mostrar_fotos(
 
         if urls_fotos:
 
+            columnas_fieldservice = st.columns(
+                min(len(urls_fotos[:2]), 2)
+            )
+
             for indice, url_foto in enumerate(
                 urls_fotos[:2]
             ):
 
-                st.image(
-                    url_foto,
-                    width=300
-                )
+                with columnas_fieldservice[indice]:
+
+                    st.image(
+                        url_foto,
+                        width=300
+                    )
 
         else:
 
             st.warning(
                 "⚠️ No se pudieron obtener las fotografías."
             )
-    
     # ========================================================
     # SIGOF
     # ========================================================

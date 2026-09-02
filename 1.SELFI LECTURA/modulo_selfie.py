@@ -235,15 +235,14 @@ def ejecutar_selfie():
                     sumi = row[f"Suministro_{i+1}"]
                     if url:
                         with cols_img[i]:
-                            st.markdown(
-                                f"""
-                                <div style="text-align:center;">
-                                    <img src="{url}" width="200"><br>
-                                    {"<span>"+str(sumi)+"</span>" if modulo=="Reparto" else ""} 
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
+                            st.image(url, use_container_width=True)
+
+                            if modulo == "Reparto":
+                                st.markdown(
+                                    f"<div style='text-align:center;'>{sumi}</div>",
+                                    unsafe_allow_html=True
+                                )
+
                             st.markdown("<div style='text-align:center;'>Observación</div>", unsafe_allow_html=True)
                             st.selectbox(
                                 "",

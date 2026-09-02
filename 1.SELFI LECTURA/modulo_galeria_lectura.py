@@ -755,7 +755,80 @@ def descargar_fotos_fieldservice(url):
         )
 
         return []
-        
+
+@st.cache_data(show_spinner=False)
+def obtener_urls_fotos_fieldservice(url):
+
+    if not instalar_playwright_chromium():
+        return []
+
+    urls_fotos = []
+
+    try:
+
+        with sync_playwright() as p:
+
+            browser = p.chromium.launch(
+                headless=True
+            )
+
+            context = browser.new_context(
+                viewport={
+                    "width": 1400,
+                    "height": 1000
+                },
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/139.0.0.0 Safari/537.36"
+                )
+            )
+
+            page = context.new_page()
+
+            page.goto(
+                url,
+                wait_until="networkidle",
+                timeout=60000
+            )
+
+            page.wait_for_selector(
+                "section.public-photo-gallery img",
+                timeout=30000
+            )
+
+            page.wait_for_timeout(3000)
+
+            elementos_imagen = page.locator(
+                "section.public-photo-gallery img"
+            )
+
+            cantidad_imagenes = elementos_imagen.count()
+
+            for indice in range(
+                min(cantidad_imagenes, 2)
+            ):
+
+                imagen_elemento = elementos_imagen.nth(indice)
+
+                url_foto = imagen_elemento.get_attribute(
+                    "src"
+                )
+
+                if url_foto:
+                    urls_fotos.append(url_foto)
+
+            browser.close()
+
+            return urls_fotos[:2]
+
+    except Exception as error:
+
+        st.write(
+            f"❌ Error obteniendo URLs FieldService: {error}"
+        )
+
+        return []
     
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL
@@ -880,48 +953,25 @@ def mostrar_fotos(
 
     if "servicios.distriluz.com.pe/FieldService" in url:
 
-        with st.spinner(
-            "📷 Cargando fotografías..."
-        ):
+        urls_fotos = obtener_urls_fotos_fieldservice(url)
 
-            fotos = descargar_fotos_fieldservice(
-                url
-            )
+        if urls_fotos:
 
-        if not fotos:
-
-            st.warning(
-                "⚠️ No se pudieron cargar las fotografías."
-            )
-
-            st.link_button(
-                "🔗 Abrir enlace original",
-                url
-            )
-
-            return
-
-        st.caption(
-            f"📷 {len(fotos)} fotografía(s)"
-        )
-
-        columnas = st.columns(
-            min(len(fotos), 2)
-        )
-
-        for posicion, foto in enumerate(fotos):
-
-            with columnas[
-                posicion % 2
-            ]:
+            for indice, url_foto in enumerate(
+                urls_fotos[:2]
+            ):
 
                 st.image(
-                    foto,
-                    use_container_width=True
+                    url_foto,
+                    width=300
                 )
 
-        return
+        else:
 
+            st.warning(
+                "⚠️ No se pudieron obtener las fotografías."
+            )
+    
     # ========================================================
     # SIGOF
     # ========================================================

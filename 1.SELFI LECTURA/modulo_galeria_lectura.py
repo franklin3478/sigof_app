@@ -2141,6 +2141,10 @@ def generar_pdf_con_fotos(df):
                     str(url_imagen).strip()
                 )
 
+                # =================================================
+                # 1. INTENTO DIRECTO CON PLAYWRIGHT REQUEST
+                # =================================================
+
                 headers = {
                     "User-Agent": (
                         "Mozilla/5.0 "
@@ -2169,25 +2173,131 @@ def generar_pdf_con_fotos(df):
                         "https://servicios.distriluz.com.pe"
                     )
 
-                respuesta = context.request.get(
-                    url_imagen,
-                    headers=headers,
-                    timeout=60000
-                )
+                try:
 
-                if respuesta.status != 200:
+                    respuesta = context.request.get(
+                        url_imagen,
+                        headers=headers,
+                        timeout=60000
+                    )
 
-                    return None
+                    if respuesta.status == 200:
 
-                contenido = respuesta.body()
+                        contenido = respuesta.body()
 
-                return validar_imagen_bytes(
-                    contenido
-                )
+                        contenido = validar_imagen_bytes(
+                            contenido
+                        )
+
+                        if contenido:
+
+                            return contenido
+
+                except Exception:
+                    pass
+
+                # =================================================
+                # 2. SEGUNDO INTENTO:
+                #    ABRIR LA MISMA URL EN EL NAVEGADOR
+                # =================================================
+
+                try:
+
+                    pagina_foto = context.new_page()
+
+                    pagina_foto.goto(
+                        url_imagen,
+                        wait_until="load",
+                        timeout=60000
+                    )
+
+                    pagina_foto.wait_for_timeout(
+                        1500
+                    )
+
+                    # ---------------------------------------------
+                    # La URL puede abrir directamente como imagen.
+                    # En ese caso el navegador crea un <img>.
+                    # ---------------------------------------------
+
+                    imagen_elemento = pagina_foto.locator(
+                        "img"
+                    ).first
+
+                    if imagen_elemento.count() > 0:
+
+                        contenido = (
+                            imagen_elemento.screenshot(
+                                type="png"
+                            )
+                        )
+
+                        pagina_foto.close()
+
+                        contenido = validar_imagen_bytes(
+                            contenido
+                        )
+
+                        if contenido:
+
+                            return contenido
+
+                    # ---------------------------------------------
+                    # RESPALDO: captura de toda la página
+                    # ---------------------------------------------
+
+                    contenido = pagina_foto.screenshot(
+                        type="png",
+                        full_page=True
+                    )
+
+                    pagina_foto.close()
+
+                    contenido = validar_imagen_bytes(
+                        contenido
+                    )
+
+                    if contenido:
+
+                        return contenido
+
+                except Exception:
+                    try:
+                        pagina_foto.close()
+                    except Exception:
+                        pass
+
+                # =================================================
+                # 3. TERCER INTENTO: REQUESTS
+                # =================================================
+
+                try:
+
+                    respuesta = requests.get(
+                        url_imagen,
+                        headers=headers,
+                        timeout=30,
+                        allow_redirects=True,
+                        verify=False
+                    )
+
+                    if respuesta.status_code == 200:
+
+                        contenido = validar_imagen_bytes(
+                            respuesta.content
+                        )
+
+                        if contenido:
+
+                            return contenido
+
+                except Exception:
+                    pass
 
             except Exception:
+                pass
 
-                return None
+            return None
 
         # ====================================================
         # OBTENER FOTOS PARA PDF
@@ -2211,78 +2321,15 @@ def generar_pdf_con_fotos(df):
 
                 if es_fieldservice(url):
 
-                    urls_fotos = []
+                    # -------------------------------------------------
+                    # IMPORTANTE:
+                    # Usamos la función que YA funciona en tu galería.
+                    # Esa función devuelve directamente los BYTES.
+                    # -------------------------------------------------
 
-                    try:
-
-                        page.goto(
-                            url,
-                            wait_until="domcontentloaded",
-                            timeout=60000
-                        )
-
-                        page.wait_for_selector(
-                            "section.public-photo-gallery img",
-                            timeout=30000
-                        )
-
-                        page.wait_for_timeout(
-                            3000
-                        )
-
-                        elementos_imagen = page.locator(
-                            "section.public-photo-gallery img"
-                        )
-
-                        cantidad_imagenes = (
-                            elementos_imagen.count()
-                        )
-
-                        for indice in range(
-                            min(cantidad_imagenes, 2)
-                        ):
-
-                            imagen_elemento = (
-                                elementos_imagen.nth(indice)
-                            )
-
-                            url_foto = (
-                                imagen_elemento.get_attribute(
-                                    "src"
-                                )
-                            )
-
-                            if url_foto:
-
-                                url_foto = urljoin(
-                                    url,
-                                    url_foto
-                                )
-
-                                urls_fotos.append(
-                                    url_foto
-                                )
-
-                    except Exception:
-
-                        urls_fotos = []
-
-                    fotos = []
-
-                    for url_foto in urls_fotos[:2]:
-
-                        contenido = (
-                            descargar_con_playwright(
-                                url_foto,
-                                url
-                            )
-                        )
-
-                        if contenido:
-
-                            fotos.append(
-                                contenido
-                            )
+                    fotos = descargar_fotos_fieldservice(
+                        url
+                    )
 
                     return fotos[:2]
 
@@ -2290,9 +2337,10 @@ def generar_pdf_con_fotos(df):
                 # SIGOF
                 # =================================================
 
-                # Primero dejamos que SIGOF entregue
-                # exactamente las URLs que ya utiliza
-                # correctamente la galería.
+                # -------------------------------------------------
+                # Usamos exactamente la misma función que utiliza
+                # actualmente la galería para encontrar las fotos.
+                # -------------------------------------------------
 
                 imagenes = extraer_imagenes(
                     url
@@ -2302,35 +2350,11 @@ def generar_pdf_con_fotos(df):
 
                     return []
 
-                # =================================================
-                # IMPORTANTE
-                #
-                # Abrimos la página SIGOF en el mismo contexto
-                # de Playwright antes de descargar las imágenes.
-                #
-                # Esto permite que cookies/sesiones necesarias
-                # queden disponibles para la descarga.
-                # =================================================
-
-                try:
-
-                    page.goto(
-                        url,
-                        wait_until="domcontentloaded",
-                        timeout=60000
-                    )
-
-                    page.wait_for_timeout(
-                        1000
-                    )
-
-                except Exception:
-
-                    # Si la navegación falla, seguimos.
-                    # Las URLs ya fueron obtenidas por SIGOF.
-                    pass
-
                 fotos = []
+
+                # -------------------------------------------------
+                # Procesar máximo 2 fotografías
+                # -------------------------------------------------
 
                 for imagen_url in imagenes[:2]:
 
@@ -2345,52 +2369,6 @@ def generar_pdf_con_fotos(df):
                             url
                         )
                     )
-
-                    # =================================================
-                    # RESPALDO
-                    #
-                    # Si Playwright no pudo descargarla,
-                    # intentamos requests como segundo método.
-                    # =================================================
-
-                    if not contenido:
-
-                        try:
-
-                            respuesta = requests.get(
-                                imagen_url,
-                                headers={
-                                    "User-Agent": (
-                                        "Mozilla/5.0 "
-                                        "(Windows NT 10.0; Win64; x64) "
-                                        "AppleWebKit/537.36 "
-                                        "(KHTML, like Gecko) "
-                                        "Chrome/139.0.0.0 "
-                                        "Safari/537.36"
-                                    ),
-                                    "Referer": url,
-                                    "Accept": (
-                                        "image/avif,image/webp,"
-                                        "image/apng,image/svg+xml,"
-                                        "image/*,*/*;q=0.8"
-                                    )
-                                },
-                                timeout=30,
-                                allow_redirects=True,
-                                verify=False
-                            )
-
-                            if respuesta.status_code == 200:
-
-                                contenido = (
-                                    validar_imagen_bytes(
-                                        respuesta.content
-                                    )
-                                )
-
-                        except Exception:
-
-                            contenido = None
 
                     if contenido:
 
@@ -2778,7 +2756,7 @@ def generar_pdf_con_fotos(df):
                     width=ancho_final,
                     height=alto_final
                 )
-                
+
                 celdas_foto.append(
                     imagen_pdf
                 )

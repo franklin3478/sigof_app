@@ -488,20 +488,34 @@ def descargar_fotos_fieldservice(url):
 
             cantidad_imagenes = elementos_imagen.count()
 
-            st.write("🔎 URL FieldService:", url)
-            st.write("🔎 URL final:", page.url)
+            st.write(
+                "🔎 URL FieldService:",
+                url
+            )
+
+            st.write(
+                "🔎 URL final:",
+                page.url
+            )
+
             st.write(
                 "📸 Imágenes encontradas en la galería:",
                 cantidad_imagenes
             )
 
-            for indice in range(min(cantidad_imagenes, 2)):
+            for indice in range(
+                min(cantidad_imagenes, 2)
+            ):
 
                 try:
 
-                    imagen_elemento = elementos_imagen.nth(indice)
+                    imagen_elemento = (
+                        elementos_imagen.nth(indice)
+                    )
 
-                    url_foto = imagen_elemento.get_attribute("src")
+                    url_foto = (
+                        imagen_elemento.get_attribute("src")
+                    )
 
                     st.write(
                         f"🔗 Foto {indice + 1}:",
@@ -516,52 +530,83 @@ def descargar_fotos_fieldservice(url):
                         continue
 
                     # ====================================================
-                    # INTENTAR CARGAR LA IMAGEN DENTRO DEL NAVEGADOR
+                    # ESPERAR A QUE EL ELEMENTO SEA VISIBLE
                     # ====================================================
 
-                    resultado = context.request.get(
-                        url_foto,
-                        headers={
-                            "Referer": url,
-                            "Origin": "https://servicios.distriluz.com.pe",
-                            "User-Agent": (
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                "Chrome/139.0.0.0 Safari/537.36"
-                            ),
-                            "Accept": (
-                                "image/avif,image/webp,image/apng,"
-                                "image/svg+xml,image/*,*/*;q=0.8"
-                            )
-                        },
-                        timeout=30000
+                    try:
+
+                        imagen_elemento.wait_for(
+                            state="visible",
+                            timeout=15000
+                        )
+
+                    except Exception:
+                        pass
+
+                    # ====================================================
+                    # COMPROBAR SI EL NAVEGADOR CARGÓ REALMENTE LA IMAGEN
+                    # ====================================================
+
+                    datos_imagen = (
+                        imagen_elemento.evaluate(
+                            """
+                            img => ({
+                                complete: img.complete,
+                                naturalWidth: img.naturalWidth,
+                                naturalHeight: img.naturalHeight
+                            })
+                            """
+                        )
                     )
 
                     st.write(
-                        f"📡 Foto {indice + 1} - HTTP:",
-                        resultado.status
+                        f"🖼️ Foto {indice + 1} - Estado:",
+                        datos_imagen
                     )
 
-                    if not resultado.ok:
+                    if (
+                        not datos_imagen.get("complete")
+                        or datos_imagen.get(
+                            "naturalWidth",
+                            0
+                        ) <= 0
+                        or datos_imagen.get(
+                            "naturalHeight",
+                            0
+                        ) <= 0
+                    ):
+
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            f"CloudFront respondió HTTP "
-                            f"{resultado.status}"
+                            "el navegador no pudo cargar "
+                            "la imagen"
                         )
+
                         continue
 
-                    contenido = resultado.body()
+                    # ====================================================
+                    # CAPTURAR LA IMAGEN YA RENDERIZADA
+                    # ====================================================
+
+                    contenido = (
+                        imagen_elemento.screenshot(
+                            type="png"
+                        )
+                    )
 
                     st.write(
-                        f"📦 Foto {indice + 1} - Bytes:",
+                        f"📦 Foto {indice + 1} - "
+                        f"Bytes capturados:",
                         len(contenido)
                     )
 
                     if not contenido:
+
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            "respuesta vacía"
+                            "la captura está vacía"
                         )
+
                         continue
 
                     # ====================================================
@@ -577,16 +622,20 @@ def descargar_fotos_fieldservice(url):
                         imagen.load()
 
                         st.write(
-                            f"🖼️ Foto {indice + 1} - Formato:",
+                            f"🖼️ Foto {indice + 1} - "
+                            f"Formato:",
                             imagen.format
                         )
 
                         st.write(
-                            f"📐 Foto {indice + 1} - Tamaño:",
+                            f"📐 Foto {indice + 1} - "
+                            f"Tamaño:",
                             imagen.size
                         )
 
-                        fotos.append(contenido)
+                        fotos.append(
+                            contenido
+                        )
 
                     except Exception as error_imagen:
 

@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 import re
 import asyncio
 import sys
+import subprocess
 from playwright.sync_api import sync_playwright
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A3, landscape
@@ -415,6 +416,24 @@ def extraer_imagenes_sigof_paralelo(
 
     return resultados
 
+@st.cache_resource(show_spinner=False)
+def instalar_playwright_chromium():
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "playwright",
+                "install",
+                "chromium"
+            ],
+            check=True,
+            timeout=180
+        )
+        return True
+    except Exception as e:
+        st.error(f"❌ Error instalando Chromium: {e}")
+        return False
 
 # ============================================================
 # DESCARGAR FOTOS FIELDSERVICE - DIAGNÓSTICO
@@ -422,6 +441,8 @@ def extraer_imagenes_sigof_paralelo(
 @st.cache_data(show_spinner=False)
 def descargar_fotos_fieldservice(url):
 
+    if not instalar_playwright_chromium():
+        return []
     fotos = []
 
     try:

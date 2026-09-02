@@ -2313,55 +2313,104 @@ def generar_pdf_con_fotos(df):
             if not url:
                 return []
 
-            try:
+            fotos = []
 
-                # =================================================
-                # FIELD SERVICE
-                # =================================================
+            # =====================================================
+            # FIELDSERVICE
+            # =====================================================
 
-                if es_fieldservice(url):
+            if es_fieldservice(url):
 
-                    # -------------------------------------------------
-                    # IMPORTANTE:
-                    # Usamos la función que YA funciona en tu galería.
-                    # Esa función devuelve directamente los BYTES.
-                    # -------------------------------------------------
+                try:
 
                     fotos = descargar_fotos_fieldservice(
                         url
                     )
 
-                    return fotos[:2]
+                except Exception:
 
-                # =================================================
-                # SIGOF
-                # =================================================
+                    fotos = []
 
-                # -------------------------------------------------
-                # Usamos exactamente la misma función que utiliza
-                # actualmente la galería para encontrar las fotos.
-                # -------------------------------------------------
+                return fotos[:2]
 
-                imagenes = extraer_imagenes(
-                    url
+            # =====================================================
+            # SIGOF
+            # =====================================================
+
+            try:
+
+                imagenes = extraer_imagenes(url)
+
+            except Exception:
+
+                imagenes = []
+
+            if not imagenes:
+
+                return []
+
+            # =====================================================
+            # DESCARGAR LAS MISMAS FOTOS QUE MUESTRA LA GALERÍA
+            # =====================================================
+
+            for imagen_url in imagenes[:2]:
+
+                if not imagen_url:
+                    continue
+
+                imagen_url = urljoin(
+                    url,
+                    str(imagen_url).strip()
                 )
 
-                if not imagenes:
-
-                    return []
-
-                fotos = []
+                contenido = None
 
                 # -------------------------------------------------
-                # Procesar máximo 2 fotografías
+                # PRIMER INTENTO: REQUESTS
                 # -------------------------------------------------
 
-                for imagen_url in imagenes[:2]:
+                try:
 
-                    imagen_url = urljoin(
-                        url,
-                        str(imagen_url).strip()
+                    respuesta = requests.get(
+                        imagen_url,
+                        headers={
+                            "User-Agent": (
+                                "Mozilla/5.0 "
+                                "(Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) "
+                                "Chrome/139.0.0.0 "
+                                "Safari/537.36"
+                            ),
+                            "Referer": url,
+                            "Accept": (
+                                "image/avif,image/webp,"
+                                "image/apng,image/svg+xml,"
+                                "image/*,*/*;q=0.8"
+                            )
+                        },
+                        timeout=30,
+                        allow_redirects=True,
+                        verify=False
                     )
+
+                    if respuesta.status_code == 200:
+
+                        contenido = (
+                            validar_imagen_bytes(
+                                respuesta.content
+                            )
+                        )
+
+                except Exception:
+
+                    contenido = None
+
+                # -------------------------------------------------
+                # SEGUNDO INTENTO: PLAYWRIGHT
+                # -------------------------------------------------
+
+                if contenido is None:
 
                     contenido = (
                         descargar_con_playwright(
@@ -2370,18 +2419,18 @@ def generar_pdf_con_fotos(df):
                         )
                     )
 
-                    if contenido:
+                # -------------------------------------------------
+                # GUARDAR LOS BYTES
+                # -------------------------------------------------
 
-                        fotos.append(
-                            contenido
-                        )
+                if contenido:
 
-                return fotos[:2]
+                    fotos.append(
+                        contenido
+                    )
 
-            except Exception:
-
-                return []
-
+            return fotos[:2]
+                               
         # ========================================================
         # ÁREA DISPONIBLE
         # ========================================================

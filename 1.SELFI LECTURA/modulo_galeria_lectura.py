@@ -435,9 +435,6 @@ def instalar_playwright_chromium():
         st.error(f"❌ Error instalando Chromium: {e}")
         return False
 
-# ============================================================
-# DESCARGAR FOTOS FIELDSERVICE - DIAGNÓSTICO
-# ============================================================
 @st.cache_data(show_spinner=False)
 def descargar_fotos_fieldservice(url):
 
@@ -469,34 +466,6 @@ def descargar_fotos_fieldservice(url):
             page = context.new_page()
 
             # ========================================================
-            # CAPTURAR LAS RESPUESTAS REALES DE LAS IMÁGENES
-            # ========================================================
-
-            respuestas_imagenes = {}
-
-            def capturar_imagen(response):
-
-                try:
-
-                    if (
-                        response.request.resource_type == "image"
-                        and "cloudfront.net" in response.url
-                        and response.status == 200
-                    ):
-
-                        respuestas_imagenes[
-                            response.url
-                        ] = response
-
-                except Exception:
-                    pass
-
-            page.on(
-                "response",
-                capturar_imagen
-            )
-
-            # ========================================================
             # ABRIR FIELD SERVICE
             # ========================================================
 
@@ -513,50 +482,19 @@ def descargar_fotos_fieldservice(url):
                 timeout=30000
             )
 
-            # Dar tiempo para que Blazor cargue las imágenes
+            # Dar tiempo a Blazor para terminar de renderizar
 
             page.wait_for_timeout(5000)
 
             # ========================================================
-            # OBTENER LAS URL DE LAS IMÁGENES
+            # OBTENER LAS IMÁGENES DEL DOM
             # ========================================================
 
-            urls_fotos = page.locator(
+            elementos_imagen = page.locator(
                 "section.public-photo-gallery img"
-            ).evaluate_all(
-                """
-                elementos => elementos
-                    .map(e => e.src)
-                    .filter(Boolean)
-                """
             )
 
-            urls_fotos = list(
-                dict.fromkeys(urls_fotos)
-            )
-
-            # Si por alguna razón no aparecen en img,
-            # buscar en los enlaces de la galería.
-
-            if not urls_fotos:
-
-                urls_fotos = page.locator(
-                    "section.public-photo-gallery a"
-                ).evaluate_all(
-                    """
-                    elementos => elementos
-                        .map(e => e.href)
-                        .filter(Boolean)
-                    """
-                )
-
-                urls_fotos = list(
-                    dict.fromkeys(urls_fotos)
-                )
-
-            # ========================================================
-            # DIAGNÓSTICO
-            # ========================================================
+            cantidad_imagenes = elementos_imagen.count()
 
             st.write(
                 "🔎 URL FieldService:",
@@ -569,93 +507,269 @@ def descargar_fotos_fieldservice(url):
             )
 
             st.write(
-                "📸 Enlaces encontrados:",
-                len(urls_fotos)
-            )
-
-            for numero, url_foto in enumerate(
-                urls_fotos[:2],
-                start=1
-            ):
-
-                st.write(
-                    f"🔗 Foto {numero}:",
-                    url_foto
-                )
-
-            st.write(
-                "📡 Imágenes capturadas por el navegador:",
-                len(respuestas_imagenes)
+                "📸 Imágenes encontradas en la galería:",
+                cantidad_imagenes
             )
 
             # ========================================================
-            # OBTENER LOS BYTES DE LAS RESPUESTAS REALES
+            # PROCESAR MÁXIMO 2 FOTOS
             # ========================================================
 
-            for numero, url_foto in enumerate(
-                urls_fotos[:2],
-                start=1
+            for indice in range(
+                min(cantidad_imagenes, 2)
             ):
 
                 try:
 
-                    respuesta = respuestas_imagenes.get(
-                        url_foto
+                    imagen_elemento = elementos_imagen.nth(
+                        indice
                     )
 
                     # ------------------------------------------------
-                    # Si no apareció exactamente la misma URL,
-                    # buscar por coincidencia.
+                    # Obtener src real
                     # ------------------------------------------------
 
-                    if respuesta is None:
+                    url_foto = imagen_elemento.get_attribute(
+                        "src"
+                    )
 
-                        for url_capturada, resp in respuestas_imagenes.items():
+                    st.write(
+                        f"🔗 Foto {indice + 1}:",
+                        url_foto
+                    )
 
-                            if url_foto == url_capturada:
+                    if not url_foto:
+                        st.write(
+                            f"❌ Foto {indice + 1}: "
+                            "no tiene src"
+                        )
+                        continue
 
-                                respuesta = resp
-                                break
+                    # ------------------------------------------------
+                    # Esperar que el elemento esté cargado
+                    # ------------------------------------------------
 
-                    if respuesta is None:
+                    imagen_cargada = page.evaluate(
+                        """
+                        (elemento) => {
+
+                            return new Promise((resolve) => {
+
+                                if (
+                                    elemento.complete &&
+                                    elemento.naturalWidth > 0
+                                ) {
+                                    resolve(true);
+                                    return;
+                                }
+
+                                elemento.addEventListener(
+                                    "load",
+                                    () => resolve(true),
+                                    { once: true }
+                                );
+
+                                elemento.addEventListener(
+                                    "error",
+                                    () => resolve(false),
+                                    { once: true }
+                                );
+
+                                setTimeout(
+                                    () => resolve(false),
+                                    15000
+                                );
+
+                            });
+
+                        }
+                        """,
+                        imagen_elemento
+                    )
+
+                    st.write(
+                        f"🖼️ Foto {indice + 1} "
+                        f"- Imagen cargada: {imagen_cargada}"
+                    )
+
+                    if not imagen_cargada:
 
                         st.write(
-                            f"❌ Foto {numero}: "
-                            "el navegador no capturó la respuesta"
+                            f"❌ Foto {indice + 1}: "
+                            "el navegador no pudo cargar "
+                            "la imagen"
                         )
 
                         continue
 
                     # ------------------------------------------------
-                    # Obtener bytes de la respuesta REAL
+                    # Verificar dimensiones reales
                     # ------------------------------------------------
 
-                    contenido = respuesta.body()
-
-                    st.write(
-                        f"📡 Foto {numero} - HTTP:",
-                        respuesta.status
+                    dimensiones = imagen_elemento.evaluate(
+                        """
+                        (img) => ({
+                            width: img.naturalWidth,
+                            height: img.naturalHeight,
+                            complete: img.complete
+                        })
+                        """
                     )
 
                     st.write(
-                        f"📄 Foto {numero} - Content-Type:",
-                        respuesta.headers.get(
-                            "content-type",
+                        f"📐 Foto {indice + 1}:",
+                        dimensiones
+                    )
+
+                    # =================================================
+                    # OBTENER LA IMAGEN DESDE EL PROPIO NAVEGADOR
+                    # =================================================
+
+                    resultado = page.evaluate(
+                        """
+                        async (img) => {
+
+                            try {
+
+                                const response =
+                                    await fetch(
+                                        img.src,
+                                        {
+                                            method: "GET",
+                                            credentials: "include"
+                                        }
+                                    );
+
+                                if (!response.ok) {
+
+                                    return {
+                                        ok: false,
+                                        status: response.status,
+                                        error:
+                                            "HTTP " +
+                                            response.status
+                                    };
+
+                                }
+
+                                const blob =
+                                    await response.blob();
+
+                                const arrayBuffer =
+                                    await blob.arrayBuffer();
+
+                                const bytes =
+                                    new Uint8Array(
+                                        arrayBuffer
+                                    );
+
+                                let binary = "";
+
+                                const tamaño = 8192;
+
+                                for (
+                                    let i = 0;
+                                    i < bytes.length;
+                                    i += tamaño
+                                ) {
+
+                                    const bloque =
+                                        bytes.subarray(
+                                            i,
+                                            Math.min(
+                                                i + tamaño,
+                                                bytes.length
+                                            )
+                                        );
+
+                                    binary += String.fromCharCode(
+                                        ...bloque
+                                    );
+
+                                }
+
+                                return {
+                                    ok: true,
+                                    status: response.status,
+                                    contentType:
+                                        blob.type,
+                                    data:
+                                        btoa(binary)
+                                };
+
+                            } catch (error) {
+
+                                return {
+                                    ok: false,
+                                    error:
+                                        String(error)
+                                };
+
+                            }
+
+                        }
+                        """,
+                        imagen_elemento
+                    )
+
+                    # =================================================
+                    # RESULTADO
+                    # =================================================
+
+                    if not resultado.get("ok"):
+
+                        st.write(
+                            f"❌ Foto {indice + 1} "
+                            f"- Error navegador:",
+                            resultado.get(
+                                "error",
+                                "Error desconocido"
+                            )
+                        )
+
+                        st.write(
+                            f"📡 Foto {indice + 1} "
+                            f"- HTTP:",
+                            resultado.get(
+                                "status",
+                                "N/A"
+                            )
+                        )
+
+                        continue
+
+                    import base64
+
+                    contenido = base64.b64decode(
+                        resultado["data"]
+                    )
+
+                    st.write(
+                        f"📡 Foto {indice + 1} "
+                        f"- HTTP:",
+                        resultado.get(
+                            "status"
+                        )
+                    )
+
+                    st.write(
+                        f"📄 Foto {indice + 1} "
+                        f"- Content-Type:",
+                        resultado.get(
+                            "contentType",
                             ""
                         )
                     )
 
                     st.write(
-                        f"📦 Foto {numero} - Bytes:",
+                        f"📦 Foto {indice + 1} "
+                        f"- Bytes:",
                         len(contenido)
                     )
 
-                    if not contenido:
-                        continue
-
-                    # ------------------------------------------------
-                    # Verificar que realmente sea una imagen
-                    # ------------------------------------------------
+                    # =================================================
+                    # VALIDAR IMAGEN
+                    # =================================================
 
                     try:
 
@@ -664,16 +778,16 @@ def descargar_fotos_fieldservice(url):
                         )
 
                         st.write(
-                            f"🖼️ Foto {numero} - Formato:",
+                            f"🖼️ Foto {indice + 1} "
+                            f"- Formato:",
                             imagen.format
                         )
 
                         st.write(
-                            f"📐 Foto {numero} - Tamaño:",
+                            f"📐 Foto {indice + 1} "
+                            f"- Tamaño:",
                             imagen.size
                         )
-
-                        # Verificación
 
                         imagen.verify()
 
@@ -684,17 +798,17 @@ def descargar_fotos_fieldservice(url):
                     except Exception as error_imagen:
 
                         st.write(
-                            f"❌ Foto {numero} - "
-                            f"No es una imagen válida: "
-                            f"{error_imagen}"
+                            f"❌ Foto {indice + 1} "
+                            f"- Imagen inválida:",
+                            error_imagen
                         )
 
-                except Exception as error_descarga:
+                except Exception as error_foto:
 
                     st.write(
-                        f"❌ Foto {numero} - "
-                        f"Error obteniendo imagen: "
-                        f"{error_descarga}"
+                        f"❌ Foto {indice + 1} "
+                        f"- Error:",
+                        error_foto
                     )
 
             browser.close()
@@ -703,14 +817,6 @@ def descargar_fotos_fieldservice(url):
                 "✅ Fotografías descargadas:",
                 len(fotos)
             )
-
-            if not fotos:
-
-                st.warning(
-                    "⚠️ FieldService cargó la página, "
-                    "pero el navegador no pudo capturar "
-                    "las respuestas de las fotografías."
-                )
 
             return fotos[:2]
 

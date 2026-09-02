@@ -417,7 +417,7 @@ def extraer_imagenes_sigof_paralelo(
 
 
 # ============================================================
-# DESCARGAR FOTOS FIELDSERVICE
+# DESCARGAR FOTOS FIELDSERVICE - DIAGNÓSTICO
 # ============================================================
 @st.cache_data(show_spinner=False)
 def descargar_fotos_fieldservice(url):
@@ -447,7 +447,7 @@ def descargar_fotos_fieldservice(url):
             page = context.new_page()
 
             # =================================================
-            # ABRIR FIELDSERVICE
+            # 1. ABRIR FIELDSERVICE
             # =================================================
 
             page.goto(
@@ -457,7 +457,7 @@ def descargar_fotos_fieldservice(url):
             )
 
             # =================================================
-            # ESPERAR A QUE BLAZOR CARGUE LA GALERÍA
+            # 2. ESPERAR GALERÍA
             # =================================================
 
             page.wait_for_selector(
@@ -465,14 +465,10 @@ def descargar_fotos_fieldservice(url):
                 timeout=30000
             )
 
-            # =================================================
-            # ESPERAR A QUE SE COMPLETE EL RENDERIZADO
-            # =================================================
-
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
             # =================================================
-            # OBTENER DIRECTAMENTE LOS HREF DE LAS FOTOS
+            # 3. OBTENER DIRECTAMENTE LOS HREF
             # =================================================
 
             urls_fotos = page.locator(
@@ -485,16 +481,12 @@ def descargar_fotos_fieldservice(url):
                 """
             )
 
-            # =================================================
-            # ELIMINAR DUPLICADOS
-            # =================================================
-
             urls_fotos = list(
                 dict.fromkeys(urls_fotos)
             )
 
             # =================================================
-            # SI NO HAY HREF, BUSCAR LOS SRC DE IMG
+            # 4. SI NO HAY HREF, BUSCAR IMG SRC
             # =================================================
 
             if not urls_fotos:
@@ -514,10 +506,46 @@ def descargar_fotos_fieldservice(url):
                 )
 
             # =================================================
-            # DESCARGAR DIRECTAMENTE LAS FOTOS
+            # DIAGNÓSTICO
             # =================================================
 
-            for url_foto in urls_fotos[:2]:
+            st.write(
+                "🔎 URL FieldService:",
+                url
+            )
+
+            st.write(
+                "🔎 URL final:",
+                page.url
+            )
+
+            st.write(
+                "📸 Enlaces encontrados:",
+                len(urls_fotos)
+            )
+
+            # =================================================
+            # MOSTRAR LAS URL ENCONTRADAS
+            # =================================================
+
+            for numero, url_foto in enumerate(
+                urls_fotos[:2],
+                start=1
+            ):
+
+                st.write(
+                    f"🔗 Foto {numero}:",
+                    url_foto
+                )
+
+            # =================================================
+            # 5. DESCARGAR LAS FOTOS
+            # =================================================
+
+            for numero, url_foto in enumerate(
+                urls_fotos[:2],
+                start=1
+            ):
 
                 try:
 
@@ -529,26 +557,65 @@ def descargar_fotos_fieldservice(url):
                             "Accept": (
                                 "image/avif,image/webp,image/apng,"
                                 "image/svg+xml,image/*,*/*;q=0.8"
+                            ),
+                            "User-Agent": (
+                                "Mozilla/5.0 "
+                                "(Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) "
+                                "Chrome/139.0.0.0 Safari/537.36"
                             )
                         }
+                    )
+
+                    # =============================================
+                    # DIAGNÓSTICO DE RESPUESTA
+                    # =============================================
+
+                    st.write(
+                        f"📡 Foto {numero} - HTTP:",
+                        respuesta.status
+                    )
+
+                    st.write(
+                        f"📄 Foto {numero} - Content-Type:",
+                        respuesta.headers.get(
+                            "content-type",
+                            ""
+                        )
+                    )
+
+                    contenido = respuesta.body()
+
+                    st.write(
+                        f"📦 Foto {numero} - Bytes:",
+                        len(contenido)
                     )
 
                     if not respuesta.ok:
                         continue
 
-                    contenido = respuesta.body()
-
                     if not contenido:
                         continue
 
-                    # =================================================
-                    # COMPROBAR QUE SEA UNA IMAGEN
-                    # =================================================
+                    # =============================================
+                    # VERIFICAR IMAGEN
+                    # =============================================
 
                     try:
 
                         imagen = PILImage.open(
                             BytesIO(contenido)
+                        )
+
+                        st.write(
+                            f"🖼️ Foto {numero} - Formato:",
+                            imagen.format
+                        )
+
+                        st.write(
+                            f"📐 Foto {numero} - Tamaño:",
+                            imagen.size
                         )
 
                         imagen.verify()
@@ -557,19 +624,36 @@ def descargar_fotos_fieldservice(url):
                             contenido
                         )
 
-                    except Exception:
+                    except Exception as error_imagen:
 
-                        continue
+                        st.write(
+                            f"❌ Foto {numero} - "
+                            f"No es una imagen válida:",
+                            error_imagen
+                        )
 
-                except Exception:
+                except Exception as error_descarga:
 
-                    continue
+                    st.write(
+                        f"❌ Foto {numero} - "
+                        f"Error descarga:",
+                        error_descarga
+                    )
 
             browser.close()
 
+            st.write(
+                "✅ Fotografías descargadas:",
+                len(fotos)
+            )
+
             return fotos[:2]
 
-    except Exception:
+    except Exception as error:
+
+        st.error(
+            f"❌ Error FieldService: {error}"
+        )
 
         return []
 

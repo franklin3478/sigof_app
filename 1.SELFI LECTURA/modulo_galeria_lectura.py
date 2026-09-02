@@ -9,6 +9,22 @@ import re
 import asyncio
 import sys
 from playwright.sync_api import sync_playwright
+import subprocess
+import os
+
+try:
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "playwright",
+            "install",
+            "chromium"
+        ],
+        check=True
+    )
+except Exception:
+    pass
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.platypus import (SimpleDocTemplate,Table,TableStyle,Image as RLImage,PageBreak,Paragraph)

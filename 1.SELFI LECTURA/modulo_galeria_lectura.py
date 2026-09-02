@@ -498,100 +498,189 @@ def descargar_fotos_fieldservice(url):
             )
 
             # =====================================================
-            # 2. OBTENER Y CAPTURAR LAS FOTOS
+            # 2. OBTENER URLS DE LAS FOTOS
             # =====================================================
+
+            urls_fotos = []
 
             for indice in range(
                 min(cantidad_imagenes, 2)
             ):
 
+                imagen_elemento = elementos_imagen.nth(indice)
+
+                url_foto = imagen_elemento.get_attribute(
+                    "src"
+                )
+
+                st.write(
+                    f"🔗 Foto {indice + 1}:",
+                    url_foto
+                )
+
+                if url_foto:
+                    urls_fotos.append(url_foto)
+
+            # =====================================================
+            # 3. PRUEBA DIRECTA CONTRA CLOUDFRONT
+            # =====================================================
+
+            for indice, url_foto in enumerate(
+                urls_fotos[:2]
+            ):
+
                 try:
 
-                    imagen_elemento = elementos_imagen.nth(indice)
-
-                    url_foto = imagen_elemento.get_attribute(
-                        "src"
+                    st.write(
+                        f"🌐 Probando CloudFront "
+                        f"directamente - Foto {indice + 1}"
                     )
+
+                    respuesta = context.request.get(
+                        url_foto,
+                        headers={
+                            "Referer": url,
+                            "Origin": (
+                                "https://servicios.distriluz.com.pe"
+                            ),
+                            "User-Agent": (
+                                "Mozilla/5.0 "
+                                "(Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) "
+                                "Chrome/139.0.0.0 "
+                                "Safari/537.36"
+                            ),
+                            "Accept": (
+                                "image/avif,image/webp,"
+                                "image/apng,image/svg+xml,"
+                                "image/*,*/*;q=0.8"
+                            )
+                        },
+                        timeout=30000
+                    )
+
+                    # =================================================
+                    # DATOS DEL SERVIDOR CLOUDFRONT
+                    # =================================================
 
                     st.write(
-                        f"🔗 Foto {indice + 1}:",
-                        url_foto
-                    )
-
-                    if not url_foto:
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "no tiene src"
-                        )
-                        continue
-
-                    # -------------------------------------------------
-                    # Esperar que la imagen sea visible
-                    # -------------------------------------------------
-
-                    try:
-                        imagen_elemento.wait_for(
-                            state="visible",
-                            timeout=15000
-                        )
-                    except Exception:
-                        pass
-
-                    # -------------------------------------------------
-                    # Verificar si el navegador realmente cargó la foto
-                    # -------------------------------------------------
-
-                    datos_imagen = imagen_elemento.evaluate(
-                        """
-                        img => ({
-                            complete: img.complete,
-                            naturalWidth: img.naturalWidth,
-                            naturalHeight: img.naturalHeight
-                        })
-                        """
-                    )
-
-                    st.write(
-                        f"🖼️ Foto {indice + 1} - Estado:",
-                        datos_imagen
-                    )
-
-                    if (
-                        not datos_imagen.get("complete")
-                        or datos_imagen.get("naturalWidth", 0) <= 0
-                        or datos_imagen.get("naturalHeight", 0) <= 0
-                    ):
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "la imagen no fue cargada "
-                            "por el navegador"
-                        )
-                        continue
-
-                    # -------------------------------------------------
-                    # CAPTURAR LA IMAGEN YA CARGADA
-                    # -------------------------------------------------
-
-                    contenido = imagen_elemento.screenshot(
-                        type="png"
+                        f"📡 Foto {indice + 1} - "
+                        f"HTTP:",
+                        respuesta.status
                     )
 
                     st.write(
                         f"📦 Foto {indice + 1} - "
-                        f"Bytes capturados:",
+                        f"Content-Type:",
+                        respuesta.headers.get(
+                            "content-type"
+                        )
+                    )
+
+                    st.write(
+                        f"📏 Foto {indice + 1} - "
+                        f"Content-Length:",
+                        respuesta.headers.get(
+                            "content-length"
+                        )
+                    )
+
+                    st.write(
+                        f"🔐 Foto {indice + 1} - "
+                        f"Server:",
+                        respuesta.headers.get(
+                            "server"
+                        )
+                    )
+
+                    contenido = respuesta.body()
+
+                    st.write(
+                        f"📦 Foto {indice + 1} - "
+                        f"Bytes recibidos:",
                         len(contenido)
                     )
 
-                    if not contenido:
+                    # =================================================
+                    # MOSTRAR ALGUNOS HEADERS IMPORTANTES
+                    # =================================================
+
+                    st.write(
+                        f"🧾 Foto {indice + 1} - "
+                        f"Headers relevantes:",
+                        {
+                            "content-type": respuesta.headers.get(
+                                "content-type"
+                            ),
+                            "content-length": respuesta.headers.get(
+                                "content-length"
+                            ),
+                            "server": respuesta.headers.get(
+                                "server"
+                            ),
+                            "via": respuesta.headers.get(
+                                "via"
+                            ),
+                            "x-cache": respuesta.headers.get(
+                                "x-cache"
+                            ),
+                            "x-amz-cf-id": respuesta.headers.get(
+                                "x-amz-cf-id"
+                            ),
+                            "x-amz-cf-pop": respuesta.headers.get(
+                                "x-amz-cf-pop"
+                            )
+                        }
+                    )
+
+                    # =================================================
+                    # SI NO ES 200, NO INTENTAR PROCESAR
+                    # =================================================
+
+                    if respuesta.status != 200:
+
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            "la captura está vacía"
+                            f"CloudFront respondió "
+                            f"HTTP {respuesta.status}"
                         )
+
+                        # Mostrar el contenido devuelto si es texto
+                        try:
+
+                            texto = contenido[:1000].decode(
+                                "utf-8",
+                                errors="replace"
+                            )
+
+                            st.write(
+                                f"📄 Respuesta CloudFront "
+                                f"Foto {indice + 1}:",
+                                texto
+                            )
+
+                        except Exception:
+                            pass
+
                         continue
 
-                    # -------------------------------------------------
-                    # VALIDAR QUE SEA UNA IMAGEN REAL
-                    # -------------------------------------------------
+                    # =================================================
+                    # VALIDAR QUE HAYA CONTENIDO
+                    # =================================================
+
+                    if not contenido:
+
+                        st.write(
+                            f"❌ Foto {indice + 1}: "
+                            "CloudFront devolvió 0 bytes"
+                        )
+
+                        continue
+
+                    # =================================================
+                    # VALIDAR IMAGEN
+                    # =================================================
 
                     try:
 
@@ -617,20 +706,38 @@ def descargar_fotos_fieldservice(url):
                             contenido
                         )
 
+                        st.write(
+                            f"✅ Foto {indice + 1}: "
+                            "imagen válida"
+                        )
+
                     except Exception as error_imagen:
 
                         st.write(
-                            f"❌ Foto {indice + 1} - "
-                            f"Imagen inválida:",
-                            error_imagen
+                            f"❌ Foto {indice + 1}: "
+                            "el contenido recibido "
+                            "NO es una imagen válida"
                         )
 
-                except Exception as error_foto:
+                        st.write(
+                            f"🔎 Detalle: "
+                            f"{error_imagen}"
+                        )
+
+                except Exception as error_request:
 
                     st.write(
-                        f"❌ Foto {indice + 1} "
-                        f"- Error: {error_foto}"
+                        f"❌ Foto {indice + 1} - "
+                        f"Error al consultar CloudFront:"
                     )
+
+                    st.write(
+                        str(error_request)
+                    )
+
+            # =====================================================
+            # 4. CERRAR NAVEGADOR
+            # =====================================================
 
             browser.close()
 
@@ -648,6 +755,7 @@ def descargar_fotos_fieldservice(url):
         )
 
         return []
+        
     
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL

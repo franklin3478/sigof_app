@@ -443,6 +443,7 @@ def descargar_fotos_fieldservice(url):
 
     if not instalar_playwright_chromium():
         return []
+
     fotos = []
 
     try:
@@ -467,9 +468,37 @@ def descargar_fotos_fieldservice(url):
 
             page = context.new_page()
 
-            # =================================================
-            # 1. ABRIR FIELDSERVICE
-            # =================================================
+            # ========================================================
+            # CAPTURAR LAS RESPUESTAS REALES DE LAS IMÁGENES
+            # ========================================================
+
+            respuestas_imagenes = {}
+
+            def capturar_imagen(response):
+
+                try:
+
+                    if (
+                        response.request.resource_type == "image"
+                        and "cloudfront.net" in response.url
+                        and response.status == 200
+                    ):
+
+                        respuestas_imagenes[
+                            response.url
+                        ] = response
+
+                except Exception:
+                    pass
+
+            page.on(
+                "response",
+                capturar_imagen
+            )
+
+            # ========================================================
+            # ABRIR FIELD SERVICE
+            # ========================================================
 
             page.goto(
                 url,
@@ -477,27 +506,27 @@ def descargar_fotos_fieldservice(url):
                 timeout=60000
             )
 
-            # =================================================
-            # 2. ESPERAR GALERÍA
-            # =================================================
+            # Esperar que aparezca la galería
 
             page.wait_for_selector(
                 "section.public-photo-gallery",
                 timeout=30000
             )
 
-            page.wait_for_timeout(3000)
+            # Dar tiempo para que Blazor cargue las imágenes
 
-            # =================================================
-            # 3. OBTENER DIRECTAMENTE LOS HREF
-            # =================================================
+            page.wait_for_timeout(5000)
+
+            # ========================================================
+            # OBTENER LAS URL DE LAS IMÁGENES
+            # ========================================================
 
             urls_fotos = page.locator(
-                "section.public-photo-gallery a"
+                "section.public-photo-gallery img"
             ).evaluate_all(
                 """
                 elementos => elementos
-                    .map(e => e.href)
+                    .map(e => e.src)
                     .filter(Boolean)
                 """
             )
@@ -506,18 +535,17 @@ def descargar_fotos_fieldservice(url):
                 dict.fromkeys(urls_fotos)
             )
 
-            # =================================================
-            # 4. SI NO HAY HREF, BUSCAR IMG SRC
-            # =================================================
+            # Si por alguna razón no aparecen en img,
+            # buscar en los enlaces de la galería.
 
             if not urls_fotos:
 
                 urls_fotos = page.locator(
-                    "section.public-photo-gallery img"
+                    "section.public-photo-gallery a"
                 ).evaluate_all(
                     """
                     elementos => elementos
-                        .map(e => e.src)
+                        .map(e => e.href)
                         .filter(Boolean)
                     """
                 )
@@ -526,9 +554,9 @@ def descargar_fotos_fieldservice(url):
                     dict.fromkeys(urls_fotos)
                 )
 
-            # =================================================
+            # ========================================================
             # DIAGNÓSTICO
-            # =================================================
+            # ========================================================
 
             st.write(
                 "🔎 URL FieldService:",
@@ -545,10 +573,6 @@ def descargar_fotos_fieldservice(url):
                 len(urls_fotos)
             )
 
-            # =================================================
-            # MOSTRAR LAS URL ENCONTRADAS
-            # =================================================
-
             for numero, url_foto in enumerate(
                 urls_fotos[:2],
                 start=1
@@ -559,9 +583,14 @@ def descargar_fotos_fieldservice(url):
                     url_foto
                 )
 
-            # =================================================
-            # 5. DESCARGAR LAS FOTOS
-            # =================================================
+            st.write(
+                "📡 Imágenes capturadas por el navegador:",
+                len(respuestas_imagenes)
+            )
+
+            # ========================================================
+            # OBTENER LOS BYTES DE LAS RESPUESTAS REALES
+            # ========================================================
 
             for numero, url_foto in enumerate(
                 urls_fotos[:2],
@@ -570,28 +599,38 @@ def descargar_fotos_fieldservice(url):
 
                 try:
 
-                    respuesta = context.request.get(
-                        url_foto,
-                        timeout=30000,
-                        headers={
-                            "Referer": page.url,
-                            "Accept": (
-                                "image/avif,image/webp,image/apng,"
-                                "image/svg+xml,image/*,*/*;q=0.8"
-                            ),
-                            "User-Agent": (
-                                "Mozilla/5.0 "
-                                "(Windows NT 10.0; Win64; x64) "
-                                "AppleWebKit/537.36 "
-                                "(KHTML, like Gecko) "
-                                "Chrome/139.0.0.0 Safari/537.36"
-                            )
-                        }
+                    respuesta = respuestas_imagenes.get(
+                        url_foto
                     )
 
-                    # =============================================
-                    # DIAGNÓSTICO DE RESPUESTA
-                    # =============================================
+                    # ------------------------------------------------
+                    # Si no apareció exactamente la misma URL,
+                    # buscar por coincidencia.
+                    # ------------------------------------------------
+
+                    if respuesta is None:
+
+                        for url_capturada, resp in respuestas_imagenes.items():
+
+                            if url_foto == url_capturada:
+
+                                respuesta = resp
+                                break
+
+                    if respuesta is None:
+
+                        st.write(
+                            f"❌ Foto {numero}: "
+                            "el navegador no capturó la respuesta"
+                        )
+
+                        continue
+
+                    # ------------------------------------------------
+                    # Obtener bytes de la respuesta REAL
+                    # ------------------------------------------------
+
+                    contenido = respuesta.body()
 
                     st.write(
                         f"📡 Foto {numero} - HTTP:",
@@ -606,22 +645,17 @@ def descargar_fotos_fieldservice(url):
                         )
                     )
 
-                    contenido = respuesta.body()
-
                     st.write(
                         f"📦 Foto {numero} - Bytes:",
                         len(contenido)
                     )
 
-                    if not respuesta.ok:
-                        continue
-
                     if not contenido:
                         continue
 
-                    # =============================================
-                    # VERIFICAR IMAGEN
-                    # =============================================
+                    # ------------------------------------------------
+                    # Verificar que realmente sea una imagen
+                    # ------------------------------------------------
 
                     try:
 
@@ -639,6 +673,8 @@ def descargar_fotos_fieldservice(url):
                             imagen.size
                         )
 
+                        # Verificación
+
                         imagen.verify()
 
                         fotos.append(
@@ -649,16 +685,16 @@ def descargar_fotos_fieldservice(url):
 
                         st.write(
                             f"❌ Foto {numero} - "
-                            f"No es una imagen válida:",
-                            error_imagen
+                            f"No es una imagen válida: "
+                            f"{error_imagen}"
                         )
 
                 except Exception as error_descarga:
 
                     st.write(
                         f"❌ Foto {numero} - "
-                        f"Error descarga:",
-                        error_descarga
+                        f"Error obteniendo imagen: "
+                        f"{error_descarga}"
                     )
 
             browser.close()
@@ -667,6 +703,14 @@ def descargar_fotos_fieldservice(url):
                 "✅ Fotografías descargadas:",
                 len(fotos)
             )
+
+            if not fotos:
+
+                st.warning(
+                    "⚠️ FieldService cargó la página, "
+                    "pero el navegador no pudo capturar "
+                    "las respuestas de las fotografías."
+                )
 
             return fotos[:2]
 

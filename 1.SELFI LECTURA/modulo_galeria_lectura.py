@@ -926,7 +926,6 @@ def mostrar_datos(
             f"**{nombre}:** {valor}"
         )
 
-
 # ============================================================
 # MOSTRAR FOTOS
 # ============================================================
@@ -948,7 +947,7 @@ def mostrar_fotos(
 
     # ========================================================
     # FIELDSERVICE
-    # NO SE MODIFICA
+    # NO SE MODIFICA EL PROCESO DE OBTENCIÓN
     # ========================================================
 
     if "servicios.distriluz.com.pe/FieldService" in url:
@@ -977,6 +976,15 @@ def mostrar_fotos(
             st.warning(
                 "⚠️ No se pudieron obtener las fotografías."
             )
+
+        # ====================================================
+        # IMPORTANTE:
+        # FieldService termina aquí.
+        # No debe continuar al proceso SIGOF.
+        # ====================================================
+
+        return
+
     # ========================================================
     # SIGOF
     # ========================================================
@@ -1036,7 +1044,6 @@ def mostrar_fotos(
                     imagen,
                     use_container_width=True
                 )
-
 
 # ============================================================
 # MOSTRAR UN REGISTRO

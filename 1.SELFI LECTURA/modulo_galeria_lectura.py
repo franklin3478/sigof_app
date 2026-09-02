@@ -2061,38 +2061,67 @@ def generar_pdf_con_fotos(df):
 
         return str(valor).strip()
 
+  
     # ========================================================
-    # DESCARGAR UNA IMAGEN DEL SIGOF ANTIGUO
+    # DESCARGAR UNA IMAGEN PARA EL PDF
     # ========================================================
 
-    def descargar_imagen_para_pdf(url):
+    def descargar_imagen_para_pdf(
+        url_imagen,
+        url_origen=None
+    ):
 
-        if not url:
+        if not url_imagen:
             return None
 
         try:
 
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/139.0.0.0 "
+                    "Safari/537.36"
+                ),
+                "Accept": (
+                    "image/avif,image/webp,"
+                    "image/apng,image/svg+xml,"
+                    "image/*,*/*;q=0.8"
+                )
+            }
+
+            # ------------------------------------------------
+            # Si viene de FieldService
+            # ------------------------------------------------
+
+            if url_origen:
+
+                headers["Referer"] = url_origen
+
+                headers["Origin"] = (
+                    "https://servicios.distriluz.com.pe"
+                )
+
             respuesta = requests.get(
-                url,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 "
-                        "(Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) "
-                        "Chrome/139.0 Safari/537.36"
-                    )
-                },
+                url_imagen,
+                headers=headers,
                 timeout=30,
                 allow_redirects=True
             )
 
-            respuesta.raise_for_status()
+            if respuesta.status_code != 200:
+                return None
 
             contenido = respuesta.content
 
             if not contenido:
                 return None
+
+            # ------------------------------------------------
+            # VALIDAR QUE REALMENTE SEA UNA IMAGEN
+            # ------------------------------------------------
 
             try:
 
@@ -2111,6 +2140,7 @@ def generar_pdf_con_fotos(df):
         except Exception:
 
             return None
+
 
     # ========================================================
     # OBTENER LAS FOTOS DEL REGISTRO
@@ -2134,9 +2164,46 @@ def generar_pdf_con_fotos(df):
 
             if es_fieldservice(url):
 
-                return descargar_fotos_fieldservice(
-                    url
-                )[:2]
+                # -------------------------------------------------
+                # IMPORTANTE:
+                # NO descargar directamente desde CloudFront
+                # usando descargar_fotos_fieldservice().
+                #
+                # Primero obtenemos las URLs desde FieldService.
+                # -------------------------------------------------
+
+                urls_fotos = (
+                    obtener_urls_fotos_fieldservice(
+                        url
+                    )
+                )
+
+                if not urls_fotos:
+                    return []
+
+                fotos = []
+
+                # -------------------------------------------------
+                # Descargar máximo 2 fotografías
+                # -------------------------------------------------
+
+                for url_foto in urls_fotos[:2]:
+
+                    contenido = (
+                        descargar_imagen_para_pdf(
+                            url_foto,
+                            url
+                        )
+                    )
+
+                    if contenido:
+
+                        fotos.append(
+                            contenido
+                        )
+
+                return fotos[:2]
+
 
             # =================================================
             # SIGOF
@@ -2153,8 +2220,10 @@ def generar_pdf_con_fotos(df):
 
             for imagen_url in imagenes[:2]:
 
-                contenido = descargar_imagen_url(
-                    imagen_url
+                contenido = (
+                    descargar_imagen_para_pdf(
+                        imagen_url
+                    )
                 )
 
                 if contenido:

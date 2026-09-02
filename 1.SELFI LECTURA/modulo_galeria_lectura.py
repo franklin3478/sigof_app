@@ -460,37 +460,27 @@ def descargar_fotos_fieldservice(url):
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/139.0.0.0 Safari/537.36"
-                )
+                ),
+                extra_http_headers={
+                    "Referer": url,
+                    "Origin": "https://servicios.distriluz.com.pe"
+                }
             )
 
             page = context.new_page()
 
-            # ========================================================
-            # ABRIR FIELD SERVICE
-            # ========================================================
-
             page.goto(
                 url,
-                wait_until="domcontentloaded",
+                wait_until="networkidle",
                 timeout=60000
             )
-
-            # ========================================================
-            # ESPERAR LA GALERÍA
-            # ========================================================
 
             page.wait_for_selector(
                 "section.public-photo-gallery",
                 timeout=30000
             )
 
-            # Dar tiempo a Blazor para cargar las imágenes
-
             page.wait_for_timeout(5000)
-
-            # ========================================================
-            # OBTENER IMÁGENES DEL DOM
-            # ========================================================
 
             elementos_imagen = page.locator(
                 "section.public-photo-gallery img"
@@ -498,42 +488,20 @@ def descargar_fotos_fieldservice(url):
 
             cantidad_imagenes = elementos_imagen.count()
 
-            st.write(
-                "🔎 URL FieldService:",
-                url
-            )
-
-            st.write(
-                "🔎 URL final:",
-                page.url
-            )
-
+            st.write("🔎 URL FieldService:", url)
+            st.write("🔎 URL final:", page.url)
             st.write(
                 "📸 Imágenes encontradas en la galería:",
                 cantidad_imagenes
             )
 
-            # ========================================================
-            # PROCESAR MÁXIMO 2 FOTOS
-            # ========================================================
-
-            for indice in range(
-                min(cantidad_imagenes, 2)
-            ):
+            for indice in range(min(cantidad_imagenes, 2)):
 
                 try:
 
-                    imagen_elemento = elementos_imagen.nth(
-                        indice
-                    )
+                    imagen_elemento = elementos_imagen.nth(indice)
 
-                    # =================================================
-                    # URL DE LA IMAGEN
-                    # =================================================
-
-                    url_foto = imagen_elemento.get_attribute(
-                        "src"
-                    )
+                    url_foto = imagen_elemento.get_attribute("src")
 
                     st.write(
                         f"🔗 Foto {indice + 1}:",
@@ -541,101 +509,64 @@ def descargar_fotos_fieldservice(url):
                     )
 
                     if not url_foto:
-
                         st.write(
                             f"❌ Foto {indice + 1}: "
                             "no tiene src"
                         )
-
                         continue
 
-                    # =================================================
-                    # ESPERAR A QUE EL IMG ESTÉ REALMENTE CARGADO
-                    # =================================================
+                    # ====================================================
+                    # INTENTAR CARGAR LA IMAGEN DENTRO DEL NAVEGADOR
+                    # ====================================================
 
-                    try:
-
-                        imagen_elemento.wait_for(
-                            state="visible",
-                            timeout=15000
-                        )
-
-                    except Exception:
-
-                        pass
-
-                    # =================================================
-                    # COMPROBAR NATURALWIDTH / NATURALHEIGHT
-                    # =================================================
-
-                    datos_imagen = imagen_elemento.evaluate(
-                        """
-                        img => ({
-                            complete: img.complete,
-                            naturalWidth: img.naturalWidth,
-                            naturalHeight: img.naturalHeight
-                        })
-                        """
+                    resultado = context.request.get(
+                        url_foto,
+                        headers={
+                            "Referer": url,
+                            "Origin": "https://servicios.distriluz.com.pe",
+                            "User-Agent": (
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/139.0.0.0 Safari/537.36"
+                            ),
+                            "Accept": (
+                                "image/avif,image/webp,image/apng,"
+                                "image/svg+xml,image/*,*/*;q=0.8"
+                            )
+                        },
+                        timeout=30000
                     )
 
                     st.write(
-                        f"🖼️ Foto {indice + 1} "
-                        f"- Estado:",
-                        datos_imagen
+                        f"📡 Foto {indice + 1} - HTTP:",
+                        resultado.status
                     )
 
-                    if (
-                        not datos_imagen.get("complete")
-                        or
-                        datos_imagen.get("naturalWidth", 0) <= 0
-                        or
-                        datos_imagen.get("naturalHeight", 0) <= 0
-                    ):
-
+                    if not resultado.ok:
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            "la imagen no fue cargada "
-                            "por el navegador"
+                            f"CloudFront respondió HTTP "
+                            f"{resultado.status}"
                         )
-
                         continue
 
-                    # =================================================
-                    # OBTENER LA IMAGEN DIRECTAMENTE DEL ELEMENTO
-                    # =================================================
-                    #
-                    # IMPORTANTE:
-                    # No hacemos requests.get()
-                    # No hacemos context.request.get()
-                    # No hacemos fetch() contra CloudFront.
-                    #
-                    # Playwright captura el elemento <img> que
-                    # ya está renderizado en FieldService.
-                    #
-                    # =================================================
-
-                    contenido = imagen_elemento.screenshot(
-                        type="png"
-                    )
+                    contenido = resultado.body()
 
                     st.write(
-                        f"📦 Foto {indice + 1} "
-                        f"- Bytes capturados:",
+                        f"📦 Foto {indice + 1} - Bytes:",
                         len(contenido)
                     )
 
                     if not contenido:
-
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            "la captura está vacía"
+                            "respuesta vacía"
                         )
-
                         continue
 
-                    # =================================================
-                    # VALIDAR QUE SEA UNA IMAGEN
-                    # =================================================
+                    # ====================================================
+                    # VALIDAR IMAGEN
+                    # ====================================================
 
                     try:
 
@@ -646,40 +577,31 @@ def descargar_fotos_fieldservice(url):
                         imagen.load()
 
                         st.write(
-                            f"🖼️ Foto {indice + 1} "
-                            f"- Formato:",
+                            f"🖼️ Foto {indice + 1} - Formato:",
                             imagen.format
                         )
 
                         st.write(
-                            f"📐 Foto {indice + 1} "
-                            f"- Tamaño:",
+                            f"📐 Foto {indice + 1} - Tamaño:",
                             imagen.size
                         )
 
-                        fotos.append(
-                            contenido
-                        )
+                        fotos.append(contenido)
 
                     except Exception as error_imagen:
 
                         st.write(
-                            f"❌ Foto {indice + 1} "
-                            f"- Imagen inválida:",
-                            error_imagen
+                            f"❌ Foto {indice + 1} - "
+                            f"Imagen inválida: "
+                            f"{error_imagen}"
                         )
 
                 except Exception as error_foto:
 
                     st.write(
-                        f"❌ Foto {indice + 1} "
-                        f"- Error:",
-                        error_foto
+                        f"❌ Foto {indice + 1} - "
+                        f"Error: {error_foto}"
                     )
-
-            # ========================================================
-            # CERRAR NAVEGADOR
-            # ========================================================
 
             browser.close()
 
@@ -697,15 +619,7 @@ def descargar_fotos_fieldservice(url):
         )
 
         return []
-
-    except Exception as error:
-
-        st.error(
-            f"❌ Error FieldService: {error}"
-        )
-
-        return []
-
+    
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL
 # ============================================================

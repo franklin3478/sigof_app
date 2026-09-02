@@ -1187,50 +1187,6 @@ def mostrar_registro_progresivo(indice, fila, columnas_mostrar):
     return placeholder_foto_resultado
 
 # ============================================================
-# OBTENER BYTES DE UNA FOTO YA DISPONIBLE
-# ============================================================
-
-@st.cache_data(show_spinner=False)
-def obtener_bytes_imagen(url_imagen):
-
-    if not url_imagen:
-        return None
-
-    try:
-
-        respuesta = requests.get(
-            str(url_imagen),
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) "
-                    "Chrome/139.0.0.0 "
-                    "Safari/537.36"
-                )
-            },
-            timeout=30,
-            allow_redirects=True,
-            verify=False
-        )
-
-        if respuesta.status_code == 200 and respuesta.content:
-
-            imagen = PILImage.open(
-                BytesIO(respuesta.content)
-            )
-
-            imagen.load()
-
-            return respuesta.content
-
-    except Exception:
-        pass
-
-    return None
-
-# ============================================================
 # FUNCIÓN PRINCIPAL
 # ============================================================
 
@@ -1778,28 +1734,6 @@ def ejecutar_galeria_lectura():
 
                 imagenes = []
 
-            # ====================================================
-            # GUARDAR LAS FOTOS PARA EL PDF
-            # ====================================================
-
-            if "galeria_fotos_bytes" not in st.session_state:
-                st.session_state.galeria_fotos_bytes = {}
-
-            for imagen_url in imagenes:
-
-                if imagen_url in st.session_state.galeria_fotos_bytes:
-                    continue
-
-                contenido_imagen = obtener_bytes_imagen(
-                    imagen_url
-                )
-
-                if contenido_imagen:
-
-                    st.session_state.galeria_fotos_bytes[
-                        imagen_url
-                    ] = contenido_imagen
-
             # Buscar todos los registros que usan esta misma URL
             placeholders = placeholders_sigof.get(
                 url,
@@ -2143,7 +2077,7 @@ def generar_pdf_con_fotos(df):
         try:
 
             headers = {
-                "User-Agent": ( 
+                "User-Agent": (
                     "Mozilla/5.0 "
                     "(Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 "
@@ -2372,52 +2306,15 @@ def generar_pdf_con_fotos(df):
             fila, 
             "__url_foto" 
         ) 
-         
-        # ====================================================
-        # OBTENER FOTOS YA CARGADAS EN LA GALERÍA
-        # ====================================================
-
-        fotos = []
-
-        fotos_guardadas = st.session_state.get(
-            "galeria_fotos_bytes",
-            {}
-        )
-
-        # ----------------------------------------------------
-        # SIGOF
-        # ----------------------------------------------------
-
-        if url_foto and not es_fieldservice(url_foto):
-
-            imagenes_sigof = extraer_imagenes(
-                url_foto
-            )
-
-            for imagen_url in imagenes_sigof[:2]:
-
-                contenido = fotos_guardadas.get(
-                    imagen_url
-                )
-
-                if contenido:
-
-                    fotos.append(
-                        contenido
-                    )
-
-        # ----------------------------------------------------
-        # FIELDSERVICE
-        # ----------------------------------------------------
-
-        else:
-
-            # FieldService todavía utiliza su proceso actual
-            fotos = obtener_fotos_pdf(
-                url_foto
-            )
-
-        fotos = fotos[:2]
+ 
+        # ==================================================== 
+        # OBTENER FOTOS 
+        # ==================================================== 
+ 
+        fotos = obtener_fotos_pdf( 
+            url_foto 
+        ) 
+ 
         # ==================================================== 
         # PREPARAR FOTOS 
         # ==================================================== 

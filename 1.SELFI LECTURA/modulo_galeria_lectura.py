@@ -1187,6 +1187,50 @@ def mostrar_registro_progresivo(indice, fila, columnas_mostrar):
     return placeholder_foto_resultado
 
 # ============================================================
+# OBTENER BYTES DE UNA FOTO YA DISPONIBLE
+# ============================================================
+
+@st.cache_data(show_spinner=False)
+def obtener_bytes_imagen(url_imagen):
+
+    if not url_imagen:
+        return None
+
+    try:
+
+        respuesta = requests.get(
+            str(url_imagen),
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/139.0.0.0 "
+                    "Safari/537.36"
+                )
+            },
+            timeout=30,
+            allow_redirects=True,
+            verify=False
+        )
+
+        if respuesta.status_code == 200 and respuesta.content:
+
+            imagen = PILImage.open(
+                BytesIO(respuesta.content)
+            )
+
+            imagen.load()
+
+            return respuesta.content
+
+    except Exception:
+        pass
+
+    return None
+
+# ============================================================
 # FUNCIÓN PRINCIPAL
 # ============================================================
 
@@ -1734,6 +1778,28 @@ def ejecutar_galeria_lectura():
 
                 imagenes = []
 
+            # ====================================================
+            # GUARDAR LAS FOTOS PARA EL PDF
+            # ====================================================
+
+            if "galeria_fotos_bytes" not in st.session_state:
+                st.session_state.galeria_fotos_bytes = {}
+
+            for imagen_url in imagenes:
+
+                if imagen_url in st.session_state.galeria_fotos_bytes:
+                    continue
+
+                contenido_imagen = obtener_bytes_imagen(
+                    imagen_url
+                )
+
+                if contenido_imagen:
+
+                    st.session_state.galeria_fotos_bytes[
+                        imagen_url
+                    ] = contenido_imagen
+
             # Buscar todos los registros que usan esta misma URL
             placeholders = placeholders_sigof.get(
                 url,
@@ -2066,191 +2132,176 @@ def generar_pdf_con_fotos(df):
     # DESCARGAR UNA IMAGEN PARA EL PDF
     # ========================================================
 
-    def descargar_imagen_para_pdf(url_imagen, url_origen=None):
-        """
-        Descarga una imagen para el PDF.
-        Usa headers de navegador, Referer cuando corresponde
-        y verify=False para evitar problemas SSL en Streamlit Cloud.
-        """
+    def descargar_imagen_para_pdf(
+        url_imagen,
+        url_origen=None
+    ):
+
         if not url_imagen:
             return None
 
         try:
+
             headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/139.0.0.0 Safari/537.36"
+                "User-Agent": ( 
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/139.0.0.0 "
+                    "Safari/537.36"
                 ),
                 "Accept": (
-                    "image/avif,image/webp,image/apng,image/svg+xml,"
+                    "image/avif,image/webp,"
+                    "image/apng,image/svg+xml,"
                     "image/*,*/*;q=0.8"
-                ),
-                "Accept-Language": "es-PE,es;q=0.9,en;q=0.8",
-                "Connection": "keep-alive",
+                )
             }
 
+            # ------------------------------------------------
+            # Si viene de FieldService
+            # ------------------------------------------------
+
             if url_origen:
-                headers["Referer"] = str(url_origen)
 
-            # =========================================================
-            # PRIMER INTENTO: REQUESTS
-            # =========================================================
-            respuesta = requests.get(
-                str(url_imagen),
-                headers=headers,
-                timeout=30,
-                allow_redirects=True,
-                verify=False
-            )
+                headers["Referer"] = url_origen
 
-            if respuesta.status_code == 200 and respuesta.content:
-                contenido = respuesta.content
-
-                try:
-                    imagen = PILImage.open(BytesIO(contenido))
-                    imagen.load()
-                    return contenido
-                except Exception:
-                    pass
-
-            # =========================================================
-            # SEGUNDO INTENTO: PLAYWRIGHT
-            # Especialmente para CloudFront / FieldService
-            # =========================================================
-            try:
-                instalar_playwright_chromium()
-
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True
-                    )
-
-                    context = browser.new_context(
-                        viewport={"width": 1280, "height": 720},
-                        user_agent=headers["User-Agent"],
-                        extra_http_headers={
-                            "Accept": headers["Accept"],
-                            "Accept-Language": headers["Accept-Language"],
-                        }
-                    )
-
-                    if url_origen:
-                        try:
-                            context.set_extra_http_headers({
-                                "Referer": str(url_origen),
-                                "Accept": headers["Accept"],
-                                "Accept-Language": headers["Accept-Language"],
-                            })
-                        except Exception:
-                            pass
-
-                    respuesta_browser = context.request.get(
-                        str(url_imagen),
-                        headers={
-                            "User-Agent": headers["User-Agent"],
-                            "Accept": headers["Accept"],
-                            "Accept-Language": headers["Accept-Language"],
-                            "Referer": str(url_origen)
-                            if url_origen else ""
-                        },
-                        timeout=30000,
-                        fail_on_status_code=False
-                    )
-
-                    if respuesta_browser.status == 200:
-                        contenido = respuesta_browser.body()
-
-                        if contenido:
-                            try:
-                                imagen = PILImage.open(
-                                    BytesIO(contenido)
-                                )
-                                imagen.load()
-
-                                context.close()
-                                browser.close()
-
-                                return contenido
-
-                            except Exception:
-                                pass
-
-                    context.close()
-                    browser.close()
-
-            except Exception:
-                pass
-
-            return None
-
-        except Exception:
-            return None
-
-
-    def obtener_fotos_pdf(url):
-        """
-        Obtiene hasta 2 fotografías para el PDF.
-        Maneja por separado SIGOF y FieldService.
-        """
-
-        if not url:
-            return []
-
-        url = str(url).strip()
-
-        if not url:
-            return []
-
-        try:
-
-            # =========================================================
-            # FIELDSERVICE
-            # =========================================================
-            if es_fieldservice(url):
-
-                urls_fotos = obtener_urls_fotos_fieldservice(url)
-
-                if not urls_fotos:
-                    return []
-
-                fotos = []
-
-                for url_foto in urls_fotos[:2]:
-
-                    contenido = descargar_imagen_para_pdf(
-                        url_foto,
-                        url
-                    )
-
-                    if contenido:
-                        fotos.append(contenido)
-
-                return fotos[:2]
-
-            # =========================================================
-            # SIGOF
-            # =========================================================
-            imagenes = extraer_imagenes(url)
-
-            if not imagenes:
-                return []
-
-            fotos = []
-
-            for imagen_url in imagenes[:2]:
-
-                contenido = descargar_imagen_para_pdf(
-                    imagen_url,
-                    url
-                )
-
-                if contenido:
-                    fotos.append(contenido)
-
-            return fotos[:2]
-
-        except Exception:
+                headers["Origin"] = (
+                    "https://servicios.distriluz.com.pe" 
+                ) 
+ 
+            respuesta = requests.get( 
+                url_imagen, 
+                headers=headers, 
+                timeout=30, 
+                allow_redirects=True 
+            ) 
+ 
+            if respuesta.status_code != 200: 
+                return None 
+ 
+            contenido = respuesta.content 
+ 
+            if not contenido: 
+                return None 
+ 
+            # ------------------------------------------------ 
+            # VALIDAR QUE REALMENTE SEA UNA IMAGEN 
+            # ------------------------------------------------ 
+ 
+            try: 
+ 
+                imagen = PILImage.open( 
+                    BytesIO(contenido) 
+                ) 
+ 
+                imagen.load() 
+ 
+                return contenido 
+ 
+            except Exception: 
+ 
+                return None 
+ 
+        except Exception: 
+ 
+            return None 
+ 
+ 
+    # ======================================================== 
+    # OBTENER LAS FOTOS DEL REGISTRO 
+    # ======================================================== 
+ 
+    def obtener_fotos_pdf(url): 
+ 
+        if not url: 
+            return [] 
+ 
+        url = str(url).strip() 
+ 
+        if not url: 
+            return [] 
+ 
+        try: 
+ 
+            # ================================================= 
+            # FIELDSERVICE 
+            # ================================================= 
+ 
+            if es_fieldservice(url): 
+ 
+                # ------------------------------------------------- 
+                # IMPORTANTE: 
+                # NO descargar directamente desde CloudFront 
+                # usando descargar_fotos_fieldservice(). 
+                # 
+                # Primero obtenemos las URLs desde FieldService. 
+                # ------------------------------------------------- 
+ 
+                urls_fotos = ( 
+                    obtener_urls_fotos_fieldservice( 
+                        url 
+                    ) 
+                ) 
+ 
+                if not urls_fotos: 
+                    return [] 
+ 
+                fotos = [] 
+ 
+                # ------------------------------------------------- 
+                # Descargar máximo 2 fotografías 
+                # ------------------------------------------------- 
+ 
+                for url_foto in urls_fotos[:2]: 
+ 
+                    contenido = ( 
+                        descargar_imagen_para_pdf( 
+                            url_foto, 
+                            url 
+                        ) 
+                    ) 
+ 
+                    if contenido: 
+ 
+                        fotos.append( 
+                            contenido 
+                        ) 
+ 
+                return fotos[:2] 
+ 
+ 
+            # ================================================= 
+            # SIGOF 
+            # ================================================= 
+ 
+            imagenes = extraer_imagenes( 
+                url 
+            ) 
+ 
+            if not imagenes: 
+                return [] 
+ 
+            fotos = [] 
+ 
+            for imagen_url in imagenes[:2]: 
+ 
+                contenido = ( 
+                    descargar_imagen_para_pdf( 
+                        imagen_url 
+                    ) 
+                ) 
+ 
+                if contenido: 
+ 
+                    fotos.append( 
+                        contenido 
+                    ) 
+ 
+            return fotos[:2] 
+ 
+        except Exception: 
+ 
             return [] 
  
     # ======================================================== 
@@ -2321,15 +2372,52 @@ def generar_pdf_con_fotos(df):
             fila, 
             "__url_foto" 
         ) 
- 
-        # ==================================================== 
-        # OBTENER FOTOS 
-        # ==================================================== 
- 
-        fotos = obtener_fotos_pdf( 
-            url_foto 
-        ) 
- 
+         
+        # ====================================================
+        # OBTENER FOTOS YA CARGADAS EN LA GALERÍA
+        # ====================================================
+
+        fotos = []
+
+        fotos_guardadas = st.session_state.get(
+            "galeria_fotos_bytes",
+            {}
+        )
+
+        # ----------------------------------------------------
+        # SIGOF
+        # ----------------------------------------------------
+
+        if url_foto and not es_fieldservice(url_foto):
+
+            imagenes_sigof = extraer_imagenes(
+                url_foto
+            )
+
+            for imagen_url in imagenes_sigof[:2]:
+
+                contenido = fotos_guardadas.get(
+                    imagen_url
+                )
+
+                if contenido:
+
+                    fotos.append(
+                        contenido
+                    )
+
+        # ----------------------------------------------------
+        # FIELDSERVICE
+        # ----------------------------------------------------
+
+        else:
+
+            # FieldService todavía utiliza su proceso actual
+            fotos = obtener_fotos_pdf(
+                url_foto
+            )
+
+        fotos = fotos[:2]
         # ==================================================== 
         # PREPARAR FOTOS 
         # ==================================================== 

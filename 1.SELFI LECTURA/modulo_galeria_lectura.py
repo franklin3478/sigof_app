@@ -2158,60 +2158,28 @@ def generar_pdf_con_fotos(df):
 
         try:
 
-            # =================================================
+            # =====================================================
             # FIELDSERVICE
-            # =================================================
+            # =====================================================
 
             if es_fieldservice(url):
 
-                # -------------------------------------------------
                 # IMPORTANTE:
-                # NO descargar directamente desde CloudFront
-                # usando descargar_fotos_fieldservice().
+                # Usamos exactamente el método que ya funciona
+                # para mostrar las fotografías en Streamlit.
                 #
-                # Primero obtenemos las URLs desde FieldService.
-                # -------------------------------------------------
+                # No hacemos requests directo a CloudFront.
 
-                urls_fotos = (
-                    obtener_urls_fotos_fieldservice(
-                        url
-                    )
-                )
-
-                if not urls_fotos:
-                    return []
-
-                fotos = []
-
-                # -------------------------------------------------
-                # Descargar máximo 2 fotografías
-                # -------------------------------------------------
-
-                for url_foto in urls_fotos[:2]:
-
-                    contenido = (
-                        descargar_imagen_para_pdf(
-                            url_foto,
-                            url
-                        )
-                    )
-
-                    if contenido:
-
-                        fotos.append(
-                            contenido
-                        )
+                fotos = descargar_fotos_fieldservice(url)
 
                 return fotos[:2]
 
 
-            # =================================================
+            # =====================================================
             # SIGOF
-            # =================================================
+            # =====================================================
 
-            imagenes = extraer_imagenes(
-                url
-            )
+            imagenes = extraer_imagenes(url)
 
             if not imagenes:
                 return []
@@ -2220,14 +2188,11 @@ def generar_pdf_con_fotos(df):
 
             for imagen_url in imagenes[:2]:
 
-                contenido = (
-                    descargar_imagen_para_pdf(
-                        imagen_url
-                    )
+                contenido = descargar_imagen_para_pdf(
+                    imagen_url
                 )
 
                 if contenido:
-
                     fotos.append(
                         contenido
                     )

@@ -438,11 +438,9 @@ def extraer_imagenes_sigof_paralelo(
 
 @st.cache_data(show_spinner=False)
 def descargar_fotos_fieldservice(url):
-
     fotos = []
 
     try:
-
         with sync_playwright() as p:
 
             browser = p.chromium.launch(
@@ -465,20 +463,52 @@ def descargar_fotos_fieldservice(url):
             # ABRIR FIELDSERVICE
             # =================================================
 
-            page.goto(
+            respuesta_navegacion = page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=60000
             )
 
-            try:
+            # =================================================
+            # ESPERAR UN POCO A QUE CARGUE JAVASCRIPT
+            # =================================================
 
+            page.wait_for_timeout(5000)
+
+            # =================================================
+            # INFORMACIÓN DE DIAGNÓSTICO
+            # =================================================
+
+            st.write(
+                f"🔎 FieldService HTTP: "
+                f"{respuesta_navegacion.status if respuesta_navegacion else 'N/A'}"
+            )
+
+            st.write(
+                f"🔎 URL final: {page.url}"
+            )
+
+            # =================================================
+            # ESPERAR GALERÍA
+            # =================================================
+
+            try:
                 page.wait_for_selector(
                     "section.public-photo-gallery",
-                    timeout=15000
+                    timeout=30000
+                )
+            except Exception:
+
+                st.error(
+                    "❌ FieldService abrió la página, "
+                    "pero no apareció "
+                    "`section.public-photo-gallery`."
                 )
 
-            except Exception:
+                st.write(
+                    "Título de la página:",
+                    page.title()
+                )
 
                 browser.close()
                 return []
@@ -506,13 +536,14 @@ def descargar_fotos_fieldservice(url):
 
                 href = href.strip()
 
-                if any(
-                    extension in href.lower()
-                    for extension in EXTENSIONES_IMAGEN
-                ):
+                # Convertir URL relativa en absoluta
+                href = urljoin(
+                    page.url,
+                    href
+                )
 
-                    if href not in urls_fotos:
-                        urls_fotos.append(href)
+                if href not in urls_fotos:
+                    urls_fotos.append(href)
 
             # =================================================
             # SI NO HAY <a>, BUSCAR <img>
@@ -537,8 +568,22 @@ def descargar_fotos_fieldservice(url):
 
                     src = src.strip()
 
+                    src = urljoin(
+                        page.url,
+                        src
+                    )
+
                     if src not in urls_fotos:
                         urls_fotos.append(src)
+
+            # =================================================
+            # INFORMACIÓN DE DIAGNÓSTICO
+            # =================================================
+
+            st.write(
+                f"📸 Enlaces encontrados: "
+                f"{len(urls_fotos)}"
+            )
 
             # =================================================
             # DESCARGAR FOTOGRAFÍAS
@@ -563,7 +608,12 @@ def descargar_fotos_fieldservice(url):
                                 contenido
                             )
 
-                except Exception:
+                except Exception as e:
+
+                    st.warning(
+                        f"⚠️ Error descargando foto: {e}"
+                    )
+
                     continue
 
             browser.close()
@@ -571,9 +621,12 @@ def descargar_fotos_fieldservice(url):
             return fotos
 
     except Exception as e:
-        st.error(f"Error FieldService: {e}")
-        return []
 
+        st.error(
+            f"❌ Error FieldService: {e}"
+        )
+
+        return []
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL
 # ============================================================

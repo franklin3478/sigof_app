@@ -1,0 +1,24 @@
+{
+    "nombre": "Mapa Personal 1",
+    "actualizado": "31/08/2026",
+    "puntos": [
+        {
+            "numero": 1,
+            "suministro": "67179860",
+            "lat": -12.0651,
+            "lng": -75.2048
+        },
+        {
+            "numero": 2,
+            "suministro": "67179861",
+            "lat": -12.0670,
+            "lng": -75.2025
+        },
+        {
+            "numero": 3,
+            "suministro": "67179862",
+            "lat": -12.0685,
+            "lng": -75.2070
+        }
+    ]
+}

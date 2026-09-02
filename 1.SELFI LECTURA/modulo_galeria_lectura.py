@@ -47,7 +47,6 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-
 # ============================================================
 # LEER EXCEL Y OBTENER HIPERVÍNCULOS
 # ============================================================
@@ -555,9 +554,9 @@ def descargar_fotos_fieldservice(url):
 
             return fotos
 
-    except Exception:
+    except Exception as e:
+        st.error(f"Error FieldService: {e}")
         return []
-
 
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL

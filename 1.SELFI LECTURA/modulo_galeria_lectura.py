@@ -469,6 +469,10 @@ def descargar_fotos_fieldservice(url):
 
             page = context.new_page()
 
+            # =====================================================
+            # 1. ABRIR FIELDSERVICE
+            # =====================================================
+
             page.goto(
                 url,
                 wait_until="networkidle",
@@ -476,11 +480,11 @@ def descargar_fotos_fieldservice(url):
             )
 
             page.wait_for_selector(
-                "section.public-photo-gallery",
+                "section.public-photo-gallery img",
                 timeout=30000
             )
 
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(3000)
 
             elementos_imagen = page.locator(
                 "section.public-photo-gallery img"
@@ -489,129 +493,105 @@ def descargar_fotos_fieldservice(url):
             cantidad_imagenes = elementos_imagen.count()
 
             st.write(
-                "🔎 URL FieldService:",
-                url
-            )
-
-            st.write(
-                "🔎 URL final:",
-                page.url
-            )
-
-            st.write(
                 "📸 Imágenes encontradas en la galería:",
                 cantidad_imagenes
             )
+
+            # =====================================================
+            # 2. OBTENER URLs
+            # =====================================================
+
+            urls_fotos = []
 
             for indice in range(
                 min(cantidad_imagenes, 2)
             ):
 
-                try:
+                imagen_elemento = elementos_imagen.nth(indice)
 
-                    imagen_elemento = (
-                        elementos_imagen.nth(indice)
-                    )
+                url_foto = imagen_elemento.get_attribute(
+                    "src"
+                )
 
-                    url_foto = (
-                        imagen_elemento.get_attribute("src")
-                    )
+                st.write(
+                    f"🔗 Foto {indice + 1}:",
+                    url_foto
+                )
 
-                    st.write(
-                        f"🔗 Foto {indice + 1}:",
+                if url_foto:
+                    urls_fotos.append(
                         url_foto
                     )
 
-                    if not url_foto:
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "no tiene src"
-                        )
-                        continue
+            # =====================================================
+            # 3. PROBAR CLOUDFRONT DIRECTAMENTE
+            # =====================================================
 
-                    # ====================================================
-                    # ESPERAR A QUE EL ELEMENTO SEA VISIBLE
-                    # ====================================================
+            for indice, url_foto in enumerate(
+                urls_fotos[:2]
+            ):
 
-                    try:
+                try:
 
-                        imagen_elemento.wait_for(
-                            state="visible",
-                            timeout=15000
-                        )
+                    st.write(
+                        f"🌐 Probando CloudFront directamente "
+                        f"- Foto {indice + 1}"
+                    )
 
-                    except Exception:
-                        pass
-
-                    # ====================================================
-                    # COMPROBAR SI EL NAVEGADOR CARGÓ REALMENTE LA IMAGEN
-                    # ====================================================
-
-                    datos_imagen = (
-                        imagen_elemento.evaluate(
-                            """
-                            img => ({
-                                complete: img.complete,
-                                naturalWidth: img.naturalWidth,
-                                naturalHeight: img.naturalHeight
-                            })
-                            """
-                        )
+                    respuesta = context.request.get(
+                        url_foto,
+                        headers={
+                            "Referer": url,
+                            "Origin": (
+                                "https://servicios.distriluz.com.pe"
+                            ),
+                            "User-Agent": (
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/139.0.0.0 Safari/537.36"
+                            ),
+                            "Accept": (
+                                "image/avif,image/webp,image/apng,"
+                                "image/svg+xml,image/*,*/*;q=0.8"
+                            )
+                        },
+                        timeout=30000
                     )
 
                     st.write(
-                        f"🖼️ Foto {indice + 1} - Estado:",
-                        datos_imagen
-                    )
-
-                    if (
-                        not datos_imagen.get("complete")
-                        or datos_imagen.get(
-                            "naturalWidth",
-                            0
-                        ) <= 0
-                        or datos_imagen.get(
-                            "naturalHeight",
-                            0
-                        ) <= 0
-                    ):
-
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "el navegador no pudo cargar "
-                            "la imagen"
-                        )
-
-                        continue
-
-                    # ====================================================
-                    # CAPTURAR LA IMAGEN YA RENDERIZADA
-                    # ====================================================
-
-                    contenido = (
-                        imagen_elemento.screenshot(
-                            type="png"
-                        )
+                        f"📡 Foto {indice + 1} - HTTP:",
+                        respuesta.status
                     )
 
                     st.write(
                         f"📦 Foto {indice + 1} - "
-                        f"Bytes capturados:",
+                        "Content-Type:",
+                        respuesta.headers.get(
+                            "content-type"
+                        )
+                    )
+
+                    contenido = respuesta.body()
+
+                    st.write(
+                        f"📦 Foto {indice + 1} - "
+                        "Bytes:",
                         len(contenido)
                     )
 
-                    if not contenido:
-
+                    if respuesta.status != 200:
                         st.write(
                             f"❌ Foto {indice + 1}: "
-                            "la captura está vacía"
+                            "CloudFront no devolvió HTTP 200"
                         )
-
                         continue
 
-                    # ====================================================
-                    # VALIDAR IMAGEN
-                    # ====================================================
+                    if not contenido:
+                        st.write(
+                            f"❌ Foto {indice + 1}: "
+                            "respuesta vacía"
+                        )
+                        continue
 
                     try:
 
@@ -623,13 +603,13 @@ def descargar_fotos_fieldservice(url):
 
                         st.write(
                             f"🖼️ Foto {indice + 1} - "
-                            f"Formato:",
+                            "Formato:",
                             imagen.format
                         )
 
                         st.write(
                             f"📐 Foto {indice + 1} - "
-                            f"Tamaño:",
+                            "Tamaño:",
                             imagen.size
                         )
 
@@ -641,15 +621,16 @@ def descargar_fotos_fieldservice(url):
 
                         st.write(
                             f"❌ Foto {indice + 1} - "
-                            f"Imagen inválida: "
-                            f"{error_imagen}"
+                            "Contenido no es una imagen:",
+                            error_imagen
                         )
 
-                except Exception as error_foto:
+                except Exception as error_request:
 
                     st.write(
                         f"❌ Foto {indice + 1} - "
-                        f"Error: {error_foto}"
+                        "Error solicitando CloudFront:",
+                        error_request
                     )
 
             browser.close()

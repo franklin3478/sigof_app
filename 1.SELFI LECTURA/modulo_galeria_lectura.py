@@ -475,19 +475,21 @@ def descargar_fotos_fieldservice(url):
                 timeout=60000
             )
 
-            # Esperar que aparezca la galería
+            # ========================================================
+            # ESPERAR LA GALERÍA
+            # ========================================================
 
             page.wait_for_selector(
                 "section.public-photo-gallery",
                 timeout=30000
             )
 
-            # Dar tiempo a Blazor para terminar de renderizar
+            # Dar tiempo a Blazor para cargar las imágenes
 
             page.wait_for_timeout(5000)
 
             # ========================================================
-            # OBTENER LAS IMÁGENES DEL DOM
+            # OBTENER IMÁGENES DEL DOM
             # ========================================================
 
             elementos_imagen = page.locator(
@@ -525,9 +527,9 @@ def descargar_fotos_fieldservice(url):
                         indice
                     )
 
-                    # ------------------------------------------------
-                    # Obtener src real
-                    # ------------------------------------------------
+                    # =================================================
+                    # URL DE LA IMAGEN
+                    # =================================================
 
                     url_foto = imagen_elemento.get_attribute(
                         "src"
@@ -539,236 +541,100 @@ def descargar_fotos_fieldservice(url):
                     )
 
                     if not url_foto:
+
                         st.write(
                             f"❌ Foto {indice + 1}: "
                             "no tiene src"
                         )
+
                         continue
 
-                    # ------------------------------------------------
-                    # Esperar que el elemento esté cargado
-                    # ------------------------------------------------
+                    # =================================================
+                    # ESPERAR A QUE EL IMG ESTÉ REALMENTE CARGADO
+                    # =================================================
 
-                    imagen_cargada = page.evaluate(
-                        """
-                        (elemento) => {
+                    try:
 
-                            return new Promise((resolve) => {
-
-                                if (
-                                    elemento.complete &&
-                                    elemento.naturalWidth > 0
-                                ) {
-                                    resolve(true);
-                                    return;
-                                }
-
-                                elemento.addEventListener(
-                                    "load",
-                                    () => resolve(true),
-                                    { once: true }
-                                );
-
-                                elemento.addEventListener(
-                                    "error",
-                                    () => resolve(false),
-                                    { once: true }
-                                );
-
-                                setTimeout(
-                                    () => resolve(false),
-                                    15000
-                                );
-
-                            });
-
-                        }
-                        """,
-                        imagen_elemento
-                    )
-
-                    st.write(
-                        f"🖼️ Foto {indice + 1} "
-                        f"- Imagen cargada: {imagen_cargada}"
-                    )
-
-                    if not imagen_cargada:
-
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "el navegador no pudo cargar "
-                            "la imagen"
+                        imagen_elemento.wait_for(
+                            state="visible",
+                            timeout=15000
                         )
 
-                        continue
+                    except Exception:
 
-                    # ------------------------------------------------
-                    # Verificar dimensiones reales
-                    # ------------------------------------------------
+                        pass
 
-                    dimensiones = imagen_elemento.evaluate(
+                    # =================================================
+                    # COMPROBAR NATURALWIDTH / NATURALHEIGHT
+                    # =================================================
+
+                    datos_imagen = imagen_elemento.evaluate(
                         """
-                        (img) => ({
-                            width: img.naturalWidth,
-                            height: img.naturalHeight,
-                            complete: img.complete
+                        img => ({
+                            complete: img.complete,
+                            naturalWidth: img.naturalWidth,
+                            naturalHeight: img.naturalHeight
                         })
                         """
                     )
 
                     st.write(
-                        f"📐 Foto {indice + 1}:",
-                        dimensiones
+                        f"🖼️ Foto {indice + 1} "
+                        f"- Estado:",
+                        datos_imagen
                     )
 
-                    # =================================================
-                    # OBTENER LA IMAGEN DESDE EL PROPIO NAVEGADOR
-                    # =================================================
-
-                    resultado = page.evaluate(
-                        """
-                        async (img) => {
-
-                            try {
-
-                                const response =
-                                    await fetch(
-                                        img.src,
-                                        {
-                                            method: "GET",
-                                            credentials: "include"
-                                        }
-                                    );
-
-                                if (!response.ok) {
-
-                                    return {
-                                        ok: false,
-                                        status: response.status,
-                                        error:
-                                            "HTTP " +
-                                            response.status
-                                    };
-
-                                }
-
-                                const blob =
-                                    await response.blob();
-
-                                const arrayBuffer =
-                                    await blob.arrayBuffer();
-
-                                const bytes =
-                                    new Uint8Array(
-                                        arrayBuffer
-                                    );
-
-                                let binary = "";
-
-                                const tamaño = 8192;
-
-                                for (
-                                    let i = 0;
-                                    i < bytes.length;
-                                    i += tamaño
-                                ) {
-
-                                    const bloque =
-                                        bytes.subarray(
-                                            i,
-                                            Math.min(
-                                                i + tamaño,
-                                                bytes.length
-                                            )
-                                        );
-
-                                    binary += String.fromCharCode(
-                                        ...bloque
-                                    );
-
-                                }
-
-                                return {
-                                    ok: true,
-                                    status: response.status,
-                                    contentType:
-                                        blob.type,
-                                    data:
-                                        btoa(binary)
-                                };
-
-                            } catch (error) {
-
-                                return {
-                                    ok: false,
-                                    error:
-                                        String(error)
-                                };
-
-                            }
-
-                        }
-                        """,
-                        imagen_elemento
-                    )
-
-                    # =================================================
-                    # RESULTADO
-                    # =================================================
-
-                    if not resultado.get("ok"):
+                    if (
+                        not datos_imagen.get("complete")
+                        or
+                        datos_imagen.get("naturalWidth", 0) <= 0
+                        or
+                        datos_imagen.get("naturalHeight", 0) <= 0
+                    ):
 
                         st.write(
-                            f"❌ Foto {indice + 1} "
-                            f"- Error navegador:",
-                            resultado.get(
-                                "error",
-                                "Error desconocido"
-                            )
-                        )
-
-                        st.write(
-                            f"📡 Foto {indice + 1} "
-                            f"- HTTP:",
-                            resultado.get(
-                                "status",
-                                "N/A"
-                            )
+                            f"❌ Foto {indice + 1}: "
+                            "la imagen no fue cargada "
+                            "por el navegador"
                         )
 
                         continue
 
-                    import base64
+                    # =================================================
+                    # OBTENER LA IMAGEN DIRECTAMENTE DEL ELEMENTO
+                    # =================================================
+                    #
+                    # IMPORTANTE:
+                    # No hacemos requests.get()
+                    # No hacemos context.request.get()
+                    # No hacemos fetch() contra CloudFront.
+                    #
+                    # Playwright captura el elemento <img> que
+                    # ya está renderizado en FieldService.
+                    #
+                    # =================================================
 
-                    contenido = base64.b64decode(
-                        resultado["data"]
-                    )
-
-                    st.write(
-                        f"📡 Foto {indice + 1} "
-                        f"- HTTP:",
-                        resultado.get(
-                            "status"
-                        )
-                    )
-
-                    st.write(
-                        f"📄 Foto {indice + 1} "
-                        f"- Content-Type:",
-                        resultado.get(
-                            "contentType",
-                            ""
-                        )
+                    contenido = imagen_elemento.screenshot(
+                        type="png"
                     )
 
                     st.write(
                         f"📦 Foto {indice + 1} "
-                        f"- Bytes:",
+                        f"- Bytes capturados:",
                         len(contenido)
                     )
 
+                    if not contenido:
+
+                        st.write(
+                            f"❌ Foto {indice + 1}: "
+                            "la captura está vacía"
+                        )
+
+                        continue
+
                     # =================================================
-                    # VALIDAR IMAGEN
+                    # VALIDAR QUE SEA UNA IMAGEN
                     # =================================================
 
                     try:
@@ -776,6 +642,8 @@ def descargar_fotos_fieldservice(url):
                         imagen = PILImage.open(
                             BytesIO(contenido)
                         )
+
+                        imagen.load()
 
                         st.write(
                             f"🖼️ Foto {indice + 1} "
@@ -788,8 +656,6 @@ def descargar_fotos_fieldservice(url):
                             f"- Tamaño:",
                             imagen.size
                         )
-
-                        imagen.verify()
 
                         fotos.append(
                             contenido
@@ -811,6 +677,10 @@ def descargar_fotos_fieldservice(url):
                         error_foto
                     )
 
+            # ========================================================
+            # CERRAR NAVEGADOR
+            # ========================================================
+
             browser.close()
 
             st.write(
@@ -819,6 +689,14 @@ def descargar_fotos_fieldservice(url):
             )
 
             return fotos[:2]
+
+    except Exception as error:
+
+        st.error(
+            f"❌ Error FieldService: {error}"
+        )
+
+        return []
 
     except Exception as error:
 

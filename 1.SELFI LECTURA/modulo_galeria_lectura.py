@@ -1981,7 +1981,10 @@ def generar_pdf_con_fotos(df):
                 nombre.strip().lower()
             )
 
-            if nombre_normalizado in columnas_normalizadas:
+            if (
+                nombre_normalizado
+                in columnas_normalizadas
+            ):
 
                 return columnas_normalizadas[
                     nombre_normalizado
@@ -2058,1040 +2061,748 @@ def generar_pdf_con_fotos(df):
 
         return str(valor).strip()
 
+  
     # ========================================================
-    # VALIDAR BYTES DE IMAGEN
+    # DESCARGAR UNA IMAGEN PARA EL PDF
     # ========================================================
 
-    def validar_imagen_bytes(contenido):
+    def descargar_imagen_para_pdf(
+        url_imagen,
+        url_origen=None
+    ):
 
-        if not contenido:
+        if not url_imagen:
             return None
 
         try:
 
-            imagen = PILImage.open(
-                BytesIO(contenido)
-            )
-
-            imagen.load()
-
-            return contenido
-
-        except Exception:
-
-            return None
-
-    # ========================================================
-    # PREPARAR PLAYWRIGHT
-    # ========================================================
-
-    playwright = None
-    browser = None
-    context = None
-    page = None
-
-    try:
-
-        if not instalar_playwright_chromium():
-
-            raise RuntimeError(
-                "No se pudo instalar/iniciar Chromium."
-            )
-
-        playwright = sync_playwright().start()
-
-        browser = playwright.chromium.launch(
-            headless=True
-        )
-
-        context = browser.new_context(
-            viewport={
-                "width": 1400,
-                "height": 1000
-            },
-            ignore_https_errors=True,
-            user_agent=(
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/139.0.0.0 "
-                "Safari/537.36"
-            )
-        )
-
-        page = context.new_page()
-
-        # ====================================================
-        # DESCARGAR FOTO USANDO PLAYWRIGHT
-        # ====================================================
-
-        def descargar_con_playwright(
-            url_imagen,
-            url_origen=None
-        ):
-
-            if not url_imagen:
-                return None
-
-            try:
-
-                url_imagen = urljoin(
-                    url_origen if url_origen else "",
-                    str(url_imagen).strip()
-                )
-
-                # =================================================
-                # 1. INTENTO DIRECTO CON PLAYWRIGHT REQUEST
-                # =================================================
-
-                headers = {
-                    "User-Agent": (
-                        "Mozilla/5.0 "
-                        "(Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) "
-                        "Chrome/139.0.0.0 "
-                        "Safari/537.36"
-                    ),
-                    "Accept": (
-                        "image/avif,image/webp,"
-                        "image/apng,image/svg+xml,"
-                        "image/*,*/*;q=0.8"
-                    )
-                }
-
-                if url_origen:
-
-                    headers["Referer"] = str(
-                        url_origen
-                    )
-
-                if es_fieldservice(url_origen):
-
-                    headers["Origin"] = (
-                        "https://servicios.distriluz.com.pe"
-                    )
-
-                try:
-
-                    respuesta = context.request.get(
-                        url_imagen,
-                        headers=headers,
-                        timeout=60000
-                    )
-
-                    if respuesta.status == 200:
-
-                        contenido = respuesta.body()
-
-                        contenido = validar_imagen_bytes(
-                            contenido
-                        )
-
-                        if contenido:
-
-                            return contenido
-
-                except Exception:
-                    pass
-
-                # =================================================
-                # 2. SEGUNDO INTENTO:
-                #    ABRIR LA MISMA URL EN EL NAVEGADOR
-                # =================================================
-
-                try:
-
-                    pagina_foto = context.new_page()
-
-                    pagina_foto.goto(
-                        url_imagen,
-                        wait_until="load",
-                        timeout=60000
-                    )
-
-                    pagina_foto.wait_for_timeout(
-                        1500
-                    )
-
-                    # ---------------------------------------------
-                    # La URL puede abrir directamente como imagen.
-                    # En ese caso el navegador crea un <img>.
-                    # ---------------------------------------------
-
-                    imagen_elemento = pagina_foto.locator(
-                        "img"
-                    ).first
-
-                    if imagen_elemento.count() > 0:
-
-                        contenido = (
-                            imagen_elemento.screenshot(
-                                type="png"
-                            )
-                        )
-
-                        pagina_foto.close()
-
-                        contenido = validar_imagen_bytes(
-                            contenido
-                        )
-
-                        if contenido:
-
-                            return contenido
-
-                    # ---------------------------------------------
-                    # RESPALDO: captura de toda la página
-                    # ---------------------------------------------
-
-                    contenido = pagina_foto.screenshot(
-                        type="png",
-                        full_page=True
-                    )
-
-                    pagina_foto.close()
-
-                    contenido = validar_imagen_bytes(
-                        contenido
-                    )
-
-                    if contenido:
-
-                        return contenido
-
-                except Exception:
-                    try:
-                        pagina_foto.close()
-                    except Exception:
-                        pass
-
-                # =================================================
-                # 3. TERCER INTENTO: REQUESTS
-                # =================================================
-
-                try:
-
-                    respuesta = requests.get(
-                        url_imagen,
-                        headers=headers,
-                        timeout=30,
-                        allow_redirects=True,
-                        verify=False
-                    )
-
-                    if respuesta.status_code == 200:
-
-                        contenido = validar_imagen_bytes(
-                            respuesta.content
-                        )
-
-                        if contenido:
-
-                            return contenido
-
-                except Exception:
-                    pass
-
-            except Exception:
-                pass
-
-            return None
-
-        # ====================================================
-        # OBTENER FOTOS PARA PDF
-        # ====================================================
-
-        def obtener_fotos_pdf(url):
-
-            if not url:
-                return []
-
-            url = str(url).strip()
-
-            if not url:
-                return []
-
-            fotos = []
-
-            # =====================================================
-            # FIELDSERVICE
-            # =====================================================
-
-            if es_fieldservice(url):
-
-                try:
-
-                    fotos = descargar_fotos_fieldservice(
-                        url
-                    )
-
-                except Exception:
-
-                    fotos = []
-
-                return fotos[:2]
-
-            # =====================================================
-            # SIGOF
-            # =====================================================
-
-            try:
-
-                imagenes = extraer_imagenes(url)
-
-            except Exception:
-
-                imagenes = []
-
-            if not imagenes:
-
-                return []
-
-            # =====================================================
-            # DESCARGAR LAS MISMAS FOTOS QUE MUESTRA LA GALERÍA
-            # =====================================================
-
-            for imagen_url in imagenes[:2]:
-
-                if not imagen_url:
-                    continue
-
-                imagen_url = urljoin(
-                    url,
-                    str(imagen_url).strip()
-                )
-
-                contenido = None
-
-                # -------------------------------------------------
-                # PRIMER INTENTO: REQUESTS
-                # -------------------------------------------------
-
-                try:
-
-                    respuesta = requests.get(
-                        imagen_url,
-                        headers={
-                            "User-Agent": (
-                                "Mozilla/5.0 "
-                                "(Windows NT 10.0; Win64; x64) "
-                                "AppleWebKit/537.36 "
-                                "(KHTML, like Gecko) "
-                                "Chrome/139.0.0.0 "
-                                "Safari/537.36"
-                            ),
-                            "Referer": url,
-                            "Accept": (
-                                "image/avif,image/webp,"
-                                "image/apng,image/svg+xml,"
-                                "image/*,*/*;q=0.8"
-                            )
-                        },
-                        timeout=30,
-                        allow_redirects=True,
-                        verify=False
-                    )
-
-                    if respuesta.status_code == 200:
-
-                        contenido = (
-                            validar_imagen_bytes(
-                                respuesta.content
-                            )
-                        )
-
-                except Exception:
-
-                    contenido = None
-
-                # -------------------------------------------------
-                # SEGUNDO INTENTO: PLAYWRIGHT
-                # -------------------------------------------------
-
-                if contenido is None:
-
-                    contenido = (
-                        descargar_con_playwright(
-                            imagen_url,
-                            url
-                        )
-                    )
-
-                # -------------------------------------------------
-                # GUARDAR LOS BYTES
-                # -------------------------------------------------
-
-                if contenido:
-
-                    fotos.append(
-                        contenido
-                    )
-
-            return fotos[:2]
-                               
-        # ========================================================
-        # ÁREA DISPONIBLE
-        # ========================================================
-
-        ancho_util = (
-            ancho_pagina
-            - doc.leftMargin
-            - doc.rightMargin
-        )
-
-        alto_util = (
-            alto_pagina
-            - doc.topMargin
-            - doc.bottomMargin
-        )
-
-        # ========================================================
-        # RECORRER REGISTROS
-        # ========================================================
-
-        total_registros = len(df)
-
-        for indice, (_, fila) in enumerate(
-            df.iterrows()
-        ):
-
-            # ====================================================
-            # DATOS
-            # ====================================================
-
-            suministro = obtener_valor(
-                fila,
-                col_suministro
-            )
-
-            medidor = obtener_valor(
-                fila,
-                col_medidor
-            )
-
-            direccion = obtener_valor(
-                fila,
-                col_direccion
-            )
-
-            obs = obtener_valor(
-                fila,
-                col_obs
-            )
-
-            obs_descripcion = obtener_valor(
-                fila,
-                col_obs_descripcion
-            )
-
-            lectura = obtener_valor(
-                fila,
-                col_lectura
-            )
-
-            # ====================================================
-            # URL FOTO
-            # ====================================================
-
-            url_foto = obtener_valor(
-                fila,
-                "__url_foto"
-            )
-
-            # ====================================================
-            # OBTENER FOTOS
-            # ====================================================
-
-            fotos = obtener_fotos_pdf(
-                url_foto
-            )
-
-            # ====================================================
-            # PREPARAR FOTOS
-            # ====================================================
-
-            fotos_pdf = []
-
-            for contenido in fotos:
-
-                try:
-
-                    imagen_original = PILImage.open(
-                        BytesIO(contenido)
-                    )
-
-                    imagen_original.load()
-
-                    ancho_original = (
-                        imagen_original.width
-                    )
-
-                    alto_original = (
-                        imagen_original.height
-                    )
-
-                    if (
-                        ancho_original <= 0
-                        or alto_original <= 0
-                    ):
-
-                        continue
-
-                    # --------------------------------------------
-                    # CONVERTIR A RGB
-                    # --------------------------------------------
-
-                    if imagen_original.mode != "RGB":
-
-                        if (
-                            "A"
-                            in imagen_original.getbands()
-                        ):
-
-                            fondo = PILImage.new(
-                                "RGB",
-                                imagen_original.size,
-                                "white"
-                            )
-
-                            fondo.paste(
-                                imagen_original,
-                                mask=imagen_original.getchannel(
-                                    "A"
-                                )
-                            )
-
-                            imagen_original = fondo
-
-                        else:
-
-                            imagen_original = (
-                                imagen_original.convert(
-                                    "RGB"
-                                )
-                            )
-
-                    # --------------------------------------------
-                    # JPEG EN MEMORIA
-                    # --------------------------------------------
-
-                    buffer = BytesIO()
-
-                    imagen_original.save(
-                        buffer,
-                        format="JPEG",
-                        quality=92
-                    )
-
-                    buffer.seek(0)
-
-                    fotos_pdf.append(
-                        {
-                            "buffer": buffer,
-                            "ancho": ancho_original,
-                            "alto": alto_original
-                        }
-                    )
-
-                except Exception:
-
-                    continue
-
-            fotos_pdf = fotos_pdf[:2]
-
-            cantidad_fotos = len(
-                fotos_pdf
-            )
-
-            # ====================================================
-            # ANCHOS DE DATOS
-            # ====================================================
-
-            anchos_datos = [
-                2.5 * cm,
-                2.7 * cm,
-                4.0 * cm,
-                2.2 * cm,
-                4.0 * cm,
-                2.7 * cm
-            ]
-
-            ancho_datos = sum(
-                anchos_datos
-            )
-
-            ancho_fotos = max(
-                1 * cm,
-                ancho_util - ancho_datos
-            )
-
-            # ====================================================
-            # DISTRIBUIR FOTOS
-            # ====================================================
-
-            if cantidad_fotos == 2:
-
-                proporcion1 = (
-                    fotos_pdf[0]["ancho"]
-                    / fotos_pdf[0]["alto"]
-                )
-
-                proporcion2 = (
-                    fotos_pdf[1]["ancho"]
-                    / fotos_pdf[1]["alto"]
-                )
-
-                suma = (
-                    proporcion1
-                    + proporcion2
-                )
-
-                ancho_foto1 = (
-                    ancho_fotos
-                    * proporcion1
-                    / suma
-                )
-
-                ancho_foto2 = (
-                    ancho_fotos
-                    * proporcion2
-                    / suma
-                )
-
-            elif cantidad_fotos == 1:
-
-                ancho_foto1 = ancho_fotos
-                ancho_foto2 = 0
-
-            else:
-
-                ancho_foto1 = 0
-                ancho_foto2 = 0
-
-            # ====================================================
-            # ALTURA
-            # ====================================================
-
-            alturas = []
-
-            if cantidad_fotos >= 1:
-
-                alturas.append(
-                    ancho_foto1
-                    * fotos_pdf[0]["alto"]
-                    / fotos_pdf[0]["ancho"]
-                )
-
-            if cantidad_fotos >= 2:
-
-                alturas.append(
-                    ancho_foto2
-                    * fotos_pdf[1]["alto"]
-                    / fotos_pdf[1]["ancho"]
-                )
-
-            if alturas:
-
-                alto_fotos = max(
-                    alturas
-                )
-
-            else:
-
-                alto_fotos = 2.5 * cm
-
-            # ====================================================
-            # ALTURA MÁXIMA
-            # ====================================================
-
-            alto_encabezado = 1.1 * cm
-
-            alto_maximo = (
-                alto_util
-                - alto_encabezado
-                - 0.5 * cm
-            )
-
-            if alto_fotos > alto_maximo:
-
-                factor = (
-                    alto_maximo
-                    / alto_fotos
-                )
-
-                ancho_foto1 *= factor
-                ancho_foto2 *= factor
-
-                alto_fotos = alto_maximo
-
-            # ====================================================
-            # CREAR CELDAS DE FOTOS
-            # ====================================================
-
-            celdas_foto = []
-
-            for posicion in range(2):
-
-                if posicion >= cantidad_fotos:
-
-                    celdas_foto.append(
-                        ""
-                    )
-
-                    continue
-
-                foto = fotos_pdf[
-                    posicion
-                ]
-
-                ancho_original = foto[
-                    "ancho"
-                ]
-
-                alto_original = foto[
-                    "alto"
-                ]
-
-                if posicion == 0:
-
-                    ancho_celda = (
-                        ancho_foto1
-                    )
-
-                else:
-
-                    ancho_celda = (
-                        ancho_foto2
-                    )
-
-                ancho_maximo_imagen = max(
-                    1,
-                    ancho_celda - 4
-                )
-
-                alto_maximo_imagen = max(
-                    1,
-                    alto_fotos - 4
-                )
-
-                escala = min(
-                    ancho_maximo_imagen
-                    / ancho_original,
-
-                    alto_maximo_imagen
-                    / alto_original
-                )
-
-                ancho_final = (
-                    ancho_original
-                    * escala
-                )
-
-                alto_final = (
-                    alto_original
-                    * escala
-                )
-
-                # =================================================
-                # USAR ImageReader
-                # =================================================
-
-                foto["buffer"].seek(0)
-
-                imagen_pdf = RLImage(
-                    foto["buffer"],
-                    width=ancho_final,
-                    height=alto_final
-                )
-
-                celdas_foto.append(
-                    imagen_pdf
-                )
-
-            # ====================================================
-            # ANCHOS FINALES
-            # ====================================================
-
-            anchos = [
-
-                anchos_datos[0],
-                anchos_datos[1],
-                anchos_datos[2],
-                anchos_datos[3],
-                anchos_datos[4],
-                anchos_datos[5],
-
-                (
-                    ancho_foto1
-                    if cantidad_fotos >= 1
-                    else 3 * cm
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) "
+                    "Chrome/139.0.0.0 "
+                    "Safari/537.36"
                 ),
-
-                (
-                    ancho_foto2
-                    if cantidad_fotos >= 2
-                    else 3 * cm
+                "Accept": (
+                    "image/avif,image/webp,"
+                    "image/apng,image/svg+xml,"
+                    "image/*,*/*;q=0.8"
                 )
-            ]
+            }
 
-            # ====================================================
-            # ASEGURAR A3
-            # ====================================================
+            # ------------------------------------------------
+            # Si viene de FieldService
+            # ------------------------------------------------
 
-            suma_anchos = sum(
-                anchos
-            )
+            if url_origen:
 
-            if suma_anchos > ancho_util:
+                headers["Referer"] = url_origen
 
-                factor = (
-                    ancho_util
-                    / suma_anchos
-                )
-
-                anchos = [
-                    x * factor
-                    for x in anchos
-                ]
-
-            # ====================================================
-            # TABLA
-            # ====================================================
-
-            datos = [
-
-                [
-
-                    Paragraph(
-                        "SUMINISTRO",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "MEDIDOR",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "DIRECCIÓN",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "OBS",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "OBS_DESCRIPCION",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "LECTURA",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "FOTO 1",
-                        estilo_encabezado
-                    ),
-
-                    Paragraph(
-                        "FOTO 2",
-                        estilo_encabezado
-                    )
-                ],
-
-                [
-
-                    Paragraph(
-                        suministro,
-                        estilo_dato
-                    ),
-
-                    Paragraph(
-                        medidor,
-                        estilo_dato
-                    ),
-
-                    Paragraph(
-                        direccion,
-                        estilo_dato
-                    ),
-
-                    Paragraph(
-                        obs,
-                        estilo_dato
-                    ),
-
-                    Paragraph(
-                        obs_descripcion,
-                        estilo_dato
-                    ),
-
-                    Paragraph(
-                        lectura,
-                        estilo_dato
-                    ),
-
-                    celdas_foto[0],
-
-                    celdas_foto[1]
-                ]
-            ]
-
-            tabla = Table(
-                datos,
-                colWidths=anchos,
-                rowHeights=[
-                    alto_encabezado,
-                    alto_fotos
-                ],
-                splitByRow=0,
-                hAlign="CENTER"
-            )
-
-            # ====================================================
-            # ESTILO
-            # ====================================================
-
-            tabla.setStyle(
-                TableStyle([
-
-                    (
-                        "BACKGROUND",
-                        (0, 0),
-                        (-1, 0),
-                        colors.HexColor(
-                            "#D9E1F2"
-                        )
-                    ),
-
-                    (
-                        "FONTNAME",
-                        (0, 0),
-                        (-1, 0),
-                        "Helvetica-Bold"
-                    ),
-
-                    (
-                        "FONTSIZE",
-                        (0, 0),
-                        (-1, 0),
-                        8
-                    ),
-
-                    (
-                        "ALIGN",
-                        (0, 0),
-                        (-1, -1),
-                        "CENTER"
-                    ),
-
-                    (
-                        "VALIGN",
-                        (0, 0),
-                        (-1, -1),
-                        "MIDDLE"
-                    ),
-
-                    (
-                        "GRID",
-                        (0, 0),
-                        (-1, -1),
-                        0.7,
-                        colors.black
-                    ),
-
-                    (
-                        "LEFTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        2
-                    ),
-
-                    (
-                        "RIGHTPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        2
-                    ),
-
-                    (
-                        "TOPPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        2
-                    ),
-
-                    (
-                        "BOTTOMPADDING",
-                        (0, 0),
-                        (-1, -1),
-                        2
-                    )
-                ])
-            )
-
-            # ====================================================
-            # AGREGAR TABLA
-            # ====================================================
-
-            elementos.append(
-                tabla
-            )
-
-            # ====================================================
-            # UNA PÁGINA POR REGISTRO
-            # ====================================================
-
-            if indice < total_registros - 1:
-
-                elementos.append(
-                    PageBreak()
-                )
-
-        # ========================================================
-        # GENERAR PDF
-        # ========================================================
-
-        doc.build(
-            elementos
-        )
-
-        archivo_salida.seek(0)
-
-        return archivo_salida
-
-    finally:
-
-        # ========================================================
-        # CERRAR PLAYWRIGHT
-        # ========================================================
-
-        try:
-
-            if context:
-                context.close()
-
-        except Exception:
-            pass
-
-        try:
-
-            if browser:
-                browser.close()
-
-        except Exception:
-            pass
-
-        try:
-
-            if playwright:
-                playwright.stop()
-
-        except Exception:
-            pass
+                headers["Origin"] = (
+                    "https://servicios.distriluz.com.pe" 
+                ) 
+ 
+            respuesta = requests.get( 
+                url_imagen, 
+                headers=headers, 
+                timeout=30, 
+                allow_redirects=True 
+            ) 
+ 
+            if respuesta.status_code != 200: 
+                return None 
+ 
+            contenido = respuesta.content 
+ 
+            if not contenido: 
+                return None 
+ 
+            # ------------------------------------------------ 
+            # VALIDAR QUE REALMENTE SEA UNA IMAGEN 
+            # ------------------------------------------------ 
+ 
+            try: 
+ 
+                imagen = PILImage.open( 
+                    BytesIO(contenido) 
+                ) 
+ 
+                imagen.load() 
+ 
+                return contenido 
+ 
+            except Exception: 
+ 
+                return None 
+ 
+        except Exception: 
+ 
+            return None 
+ 
+ 
+    # ======================================================== 
+    # OBTENER LAS FOTOS DEL REGISTRO 
+    # ======================================================== 
+ 
+    def obtener_fotos_pdf(url): 
+ 
+        if not url: 
+            return [] 
+ 
+        url = str(url).strip() 
+ 
+        if not url: 
+            return [] 
+ 
+        try: 
+ 
+            # ================================================= 
+            # FIELDSERVICE 
+            # ================================================= 
+ 
+            if es_fieldservice(url): 
+ 
+                # ------------------------------------------------- 
+                # IMPORTANTE: 
+                # NO descargar directamente desde CloudFront 
+                # usando descargar_fotos_fieldservice(). 
+                # 
+                # Primero obtenemos las URLs desde FieldService. 
+                # ------------------------------------------------- 
+ 
+                urls_fotos = ( 
+                    obtener_urls_fotos_fieldservice( 
+                        url 
+                    ) 
+                ) 
+ 
+                if not urls_fotos: 
+                    return [] 
+ 
+                fotos = [] 
+ 
+                # ------------------------------------------------- 
+                # Descargar máximo 2 fotografías 
+                # ------------------------------------------------- 
+ 
+                for url_foto in urls_fotos[:2]: 
+ 
+                    contenido = ( 
+                        descargar_imagen_para_pdf( 
+                            url_foto, 
+                            url 
+                        ) 
+                    ) 
+ 
+                    if contenido: 
+ 
+                        fotos.append( 
+                            contenido 
+                        ) 
+ 
+                return fotos[:2] 
+ 
+ 
+            # ================================================= 
+            # SIGOF 
+            # ================================================= 
+ 
+            imagenes = extraer_imagenes( 
+                url 
+            ) 
+ 
+            if not imagenes: 
+                return [] 
+ 
+            fotos = [] 
+ 
+            for imagen_url in imagenes[:2]: 
+ 
+                contenido = ( 
+                    descargar_imagen_para_pdf( 
+                        imagen_url 
+                    ) 
+                ) 
+ 
+                if contenido: 
+ 
+                    fotos.append( 
+                        contenido 
+                    ) 
+ 
+            return fotos[:2] 
+ 
+        except Exception: 
+ 
+            return [] 
+ 
+    # ======================================================== 
+    # ÁREA DISPONIBLE 
+    # ======================================================== 
+ 
+    ancho_util = ( 
+        ancho_pagina 
+        - doc.leftMargin 
+        - doc.rightMargin 
+    ) 
+ 
+    alto_util = ( 
+        alto_pagina 
+        - doc.topMargin 
+        - doc.bottomMargin 
+    ) 
+ 
+    # ======================================================== 
+    # RECORRER REGISTROS 
+    # ======================================================== 
+ 
+    total_registros = len(df) 
+ 
+    for indice, (_, fila) in enumerate( 
+        df.iterrows() 
+    ): 
+ 
+        # ==================================================== 
+        # DATOS 
+        # ==================================================== 
+ 
+        suministro = obtener_valor( 
+            fila, 
+            col_suministro 
+        ) 
+ 
+        medidor = obtener_valor( 
+            fila, 
+            col_medidor 
+        ) 
+ 
+        direccion = obtener_valor( 
+            fila, 
+            col_direccion 
+        ) 
+ 
+        obs = obtener_valor( 
+            fila, 
+            col_obs 
+        ) 
+ 
+        obs_descripcion = obtener_valor( 
+            fila, 
+            col_obs_descripcion 
+        ) 
+ 
+        lectura = obtener_valor( 
+            fila, 
+            col_lectura 
+        ) 
+ 
+        # ==================================================== 
+        # OBTENER URL REAL DEL HYPERLINK 
+        # ==================================================== 
+ 
+        url_foto = obtener_valor( 
+            fila, 
+            "__url_foto" 
+        ) 
+ 
+        # ==================================================== 
+        # OBTENER FOTOS 
+        # ==================================================== 
+ 
+        fotos = obtener_fotos_pdf( 
+            url_foto 
+        ) 
+ 
+        # ==================================================== 
+        # PREPARAR FOTOS 
+        # ==================================================== 
+ 
+        fotos_pdf = [] 
+ 
+        for contenido in fotos: 
+ 
+            try: 
+ 
+                imagen_original = PILImage.open( 
+                    BytesIO(contenido) 
+                ) 
+ 
+                imagen_original.load() 
+ 
+                ancho_original = imagen_original.width 
+ 
+                alto_original = imagen_original.height 
+ 
+                # -------------------------------------------- 
+                # CONVERTIR A RGB 
+                # -------------------------------------------- 
+ 
+                if imagen_original.mode != "RGB": 
+ 
+                    if "A" in imagen_original.getbands(): 
+ 
+                        fondo = PILImage.new( 
+                            "RGB", 
+                            imagen_original.size, 
+                            "white" 
+                        ) 
+ 
+                        fondo.paste( 
+                            imagen_original, 
+                            mask=imagen_original.getchannel("A") 
+                        ) 
+ 
+                        imagen_original = fondo 
+ 
+                    else: 
+ 
+                        imagen_original = ( 
+                            imagen_original.convert( 
+                                "RGB" 
+                            ) 
+                        ) 
+ 
+                # -------------------------------------------- 
+                # JPEG EN MEMORIA 
+                # -------------------------------------------- 
+ 
+                buffer = BytesIO() 
+ 
+                imagen_original.save( 
+                    buffer, 
+                    format="JPEG", 
+                    quality=92 
+                ) 
+ 
+                buffer.seek(0) 
+ 
+                fotos_pdf.append( 
+                    { 
+                        "buffer": buffer, 
+                        "ancho": ancho_original, 
+                        "alto": alto_original 
+                    } 
+                ) 
+ 
+            except Exception: 
+ 
+                continue 
+ 
+        # ==================================================== 
+        # MÁXIMO 2 
+        # ==================================================== 
+ 
+        fotos_pdf = fotos_pdf[:2] 
+ 
+        cantidad_fotos = len( 
+            fotos_pdf 
+        ) 
+ 
+        # ==================================================== 
+        # ANCHOS BASE DE DATOS 
+        # ==================================================== 
+ 
+        anchos_datos = [ 
+            2.5 * cm, 
+            2.7 * cm, 
+            4.0 * cm, 
+            2.2 * cm, 
+            4.0 * cm, 
+            2.7 * cm 
+        ] 
+ 
+        ancho_datos = sum( 
+            anchos_datos 
+        ) 
+ 
+        ancho_fotos = max( 
+            1 * cm, 
+            ancho_util - ancho_datos 
+        ) 
+ 
+        # ==================================================== 
+        # DISTRIBUIR ANCHO DE FOTOS 
+        # ==================================================== 
+ 
+        if cantidad_fotos == 2: 
+ 
+            proporcion1 = ( 
+                fotos_pdf[0]["ancho"] 
+                / fotos_pdf[0]["alto"] 
+            ) 
+ 
+            proporcion2 = ( 
+                fotos_pdf[1]["ancho"] 
+                / fotos_pdf[1]["alto"] 
+            ) 
+ 
+            suma = ( 
+                proporcion1 
+                + proporcion2 
+            ) 
+ 
+            ancho_foto1 = ( 
+                ancho_fotos 
+                * proporcion1 
+                / suma 
+            ) 
+ 
+            ancho_foto2 = ( 
+                ancho_fotos 
+                * proporcion2 
+                / suma 
+            ) 
+ 
+        elif cantidad_fotos == 1: 
+ 
+            ancho_foto1 = ancho_fotos 
+            ancho_foto2 = 0 
+ 
+        else: 
+ 
+            ancho_foto1 = 0 
+            ancho_foto2 = 0 
+ 
+        # ==================================================== 
+        # CALCULAR ALTURA 
+        # ==================================================== 
+ 
+        alturas = [] 
+ 
+        if cantidad_fotos >= 1: 
+ 
+            alturas.append( 
+                ancho_foto1 
+                * fotos_pdf[0]["alto"] 
+                / fotos_pdf[0]["ancho"] 
+            ) 
+ 
+        if cantidad_fotos >= 2: 
+ 
+            alturas.append( 
+                ancho_foto2 
+                * fotos_pdf[1]["alto"] 
+                / fotos_pdf[1]["ancho"] 
+            ) 
+ 
+        if alturas: 
+ 
+            alto_fotos = max( 
+                alturas 
+            ) 
+ 
+        else: 
+ 
+            alto_fotos = 2.5 * cm 
+ 
+        # ==================================================== 
+        # ALTURA MÁXIMA 
+        # ==================================================== 
+ 
+        alto_encabezado = 1.1 * cm 
+ 
+        alto_maximo = ( 
+            alto_util 
+            - alto_encabezado 
+            - 0.5 * cm 
+        ) 
+ 
+        if alto_fotos > alto_maximo: 
+ 
+            factor = ( 
+                alto_maximo 
+                / alto_fotos 
+            ) 
+ 
+            ancho_foto1 *= factor 
+            ancho_foto2 *= factor 
+ 
+            alto_fotos = alto_maximo 
+ 
+        # ==================================================== 
+        # CREAR IMÁGENES 
+        # ==================================================== 
+ 
+        celdas_foto = [] 
+ 
+        for posicion in range(2): 
+ 
+            if posicion >= cantidad_fotos: 
+ 
+                celdas_foto.append("") 
+                continue 
+ 
+            foto = fotos_pdf[posicion] 
+ 
+            ancho_original = foto["ancho"] 
+            alto_original = foto["alto"] 
+ 
+            if posicion == 0: 
+ 
+                ancho_celda = ancho_foto1 
+ 
+            else: 
+ 
+                ancho_celda = ancho_foto2 
+ 
+            ancho_maximo = max( 
+                1, 
+                ancho_celda - 4 
+            ) 
+ 
+            alto_maximo_imagen = max( 
+                1, 
+                alto_fotos - 4 
+            ) 
+ 
+            escala = min( 
+                ancho_maximo / ancho_original, 
+                alto_maximo_imagen / alto_original 
+            ) 
+ 
+            ancho_final = ( 
+                ancho_original 
+                * escala 
+            ) 
+ 
+            alto_final = ( 
+                alto_original 
+                * escala 
+            ) 
+ 
+            imagen_pdf = RLImage( 
+                foto["buffer"], 
+                width=ancho_final, 
+                height=alto_final 
+            ) 
+ 
+            celdas_foto.append( 
+                imagen_pdf 
+            ) 
+ 
+        # ==================================================== 
+        # ANCHOS FINALES 
+        # ==================================================== 
+ 
+        anchos = [ 
+            anchos_datos[0], 
+            anchos_datos[1], 
+            anchos_datos[2], 
+            anchos_datos[3], 
+            anchos_datos[4], 
+            anchos_datos[5], 
+            ( 
+                ancho_foto1 
+                if cantidad_fotos >= 1 
+                else 3 * cm 
+            ), 
+            ( 
+                ancho_foto2 
+                if cantidad_fotos >= 2 
+                else 3 * cm 
+            ) 
+        ] 
+ 
+        # ==================================================== 
+        # ASEGURAR QUE NO SUPERE A3 
+        # ==================================================== 
+ 
+        suma_anchos = sum( 
+            anchos 
+        ) 
+ 
+        if suma_anchos > ancho_util: 
+ 
+            factor = ( 
+                ancho_util 
+                / suma_anchos 
+            ) 
+ 
+            anchos = [ 
+                x * factor 
+                for x in anchos 
+            ] 
+ 
+        # ==================================================== 
+        # TABLA 
+        # ==================================================== 
+ 
+        datos = [ 
+ 
+            [ 
+                Paragraph( 
+                    "SUMINISTRO", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "MEDIDOR", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "DIRECCIÓN", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "OBS", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "OBS_DESCRIPCION", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "LECTURA", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "FOTO 1", 
+                    estilo_encabezado 
+                ), 
+                Paragraph( 
+                    "FOTO 2", 
+                    estilo_encabezado 
+                ) 
+            ], 
+ 
+            [ 
+                Paragraph( 
+                    suministro, 
+                    estilo_dato 
+                ), 
+                Paragraph( 
+                    medidor, 
+                    estilo_dato 
+                ), 
+                Paragraph( 
+                    direccion, 
+                    estilo_dato 
+                ), 
+                Paragraph( 
+                    obs, 
+                    estilo_dato 
+                ), 
+                Paragraph( 
+                    obs_descripcion, 
+                    estilo_dato 
+                ), 
+                Paragraph( 
+                    lectura, 
+                    estilo_dato 
+                ), 
+                celdas_foto[0], 
+                celdas_foto[1] 
+            ] 
+        ] 
+ 
+        tabla = Table( 
+            datos, 
+            colWidths=anchos, 
+            rowHeights=[ 
+                alto_encabezado, 
+                alto_fotos 
+            ], 
+            splitByRow=0, 
+            hAlign="CENTER" 
+        ) 
+ 
+        # ==================================================== 
+        # ESTILO 
+        # ==================================================== 
+ 
+        tabla.setStyle( 
+            TableStyle([ 
+                ( 
+                    "BACKGROUND", 
+                    (0, 0), 
+                    (-1, 0), 
+                    colors.HexColor("#D9E1F2") 
+                ), 
+                ( 
+                    "FONTNAME", 
+                    (0, 0), 
+                    (-1, 0), 
+                    "Helvetica-Bold" 
+                ), 
+                ( 
+                    "FONTSIZE", 
+                    (0, 0), 
+                    (-1, 0), 
+                    8 
+                ), 
+                ( 
+                    "ALIGN", 
+                    (0, 0), 
+                    (-1, -1), 
+                    "CENTER" 
+                ), 
+                ( 
+                    "VALIGN", 
+                    (0, 0), 
+                    (-1, -1), 
+                    "MIDDLE" 
+                ), 
+                ( 
+                    "GRID", 
+                    (0, 0), 
+                    (-1, -1), 
+                    0.7, 
+                    colors.black 
+                ), 
+                ( 
+                    "LEFTPADDING", 
+                    (0, 0), 
+                    (-1, -1), 
+                    2 
+                ), 
+                ( 
+                    "RIGHTPADDING", 
+                    (0, 0), 
+                    (-1, -1), 
+                    2 
+                ), 
+                ( 
+                    "TOPPADDING", 
+                    (0, 0), 
+                    (-1, -1), 
+                    2 
+                ), 
+                ( 
+                    "BOTTOMPADDING", 
+                    (0, 0), 
+                    (-1, -1), 
+                    2 
+                ) 
+            ]) 
+        ) 
+ 
+        # ==================================================== 
+        # AGREGAR 
+        # ==================================================== 
+ 
+        elementos.append( 
+            tabla 
+        ) 
+ 
+        # ==================================================== 
+        # UNA PÁGINA POR REGISTRO 
+        # ==================================================== 
+ 
+        if indice < total_registros - 1: 
+ 
+            elementos.append( 
+                PageBreak() 
+            ) 
+ 
+    # ======================================================== 
+    # GENERAR PDF 
+    # ======================================================== 
+ 
+    doc.build( 
+        elementos 
+    ) 
+ 
+    archivo_salida.seek(0) 
+ 
+    return archivo_salida

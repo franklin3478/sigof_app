@@ -9,22 +9,6 @@ import re
 import asyncio
 import sys
 from playwright.sync_api import sync_playwright
-import subprocess
-import os
-
-try:
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "playwright",
-            "install",
-            "chromium"
-        ],
-        check=True
-    )
-except Exception:
-    pass
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.platypus import (SimpleDocTemplate,Table,TableStyle,Image as RLImage,PageBreak,Paragraph)
@@ -435,19 +419,20 @@ def extraer_imagenes_sigof_paralelo(
 # ============================================================
 # DESCARGAR FOTOS FIELDSERVICE
 # ============================================================
-
 @st.cache_data(show_spinner=False)
 def descargar_fotos_fieldservice(url):
+
     fotos = []
 
     try:
+
         with sync_playwright() as p:
 
             browser = p.chromium.launch(
                 headless=True
             )
 
-            page = browser.new_page(
+            context = browser.new_context(
                 viewport={
                     "width": 1400,
                     "height": 1000
@@ -459,174 +444,135 @@ def descargar_fotos_fieldservice(url):
                 )
             )
 
+            page = context.new_page()
+
             # =================================================
             # ABRIR FIELDSERVICE
             # =================================================
 
-            respuesta_navegacion = page.goto(
+            page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=60000
             )
 
             # =================================================
-            # ESPERAR UN POCO A QUE CARGUE JAVASCRIPT
+            # ESPERAR A QUE BLAZOR CARGUE LA GALERÍA
             # =================================================
 
-            page.wait_for_timeout(5000)
-
-            # =================================================
-            # INFORMACIÓN DE DIAGNÓSTICO
-            # =================================================
-
-            st.write(
-                f"🔎 FieldService HTTP: "
-                f"{respuesta_navegacion.status if respuesta_navegacion else 'N/A'}"
-            )
-
-            st.write(
-                f"🔎 URL final: {page.url}"
+            page.wait_for_selector(
+                "section.public-photo-gallery",
+                timeout=30000
             )
 
             # =================================================
-            # ESPERAR GALERÍA
+            # ESPERAR A QUE SE COMPLETE EL RENDERIZADO
             # =================================================
 
-            try:
-                page.wait_for_selector(
-                    "section.public-photo-gallery",
-                    timeout=30000
-                )
-            except Exception:
-
-                st.error(
-                    "❌ FieldService abrió la página, "
-                    "pero no apareció "
-                    "`section.public-photo-gallery`."
-                )
-
-                st.write(
-                    "Título de la página:",
-                    page.title()
-                )
-
-                browser.close()
-                return []
+            page.wait_for_timeout(2000)
 
             # =================================================
-            # OBTENER ENLACES DE LAS FOTOGRAFÍAS
+            # OBTENER DIRECTAMENTE LOS HREF DE LAS FOTOS
             # =================================================
 
-            enlaces = page.locator(
+            urls_fotos = page.locator(
                 "section.public-photo-gallery a"
+            ).evaluate_all(
+                """
+                elementos => elementos
+                    .map(e => e.href)
+                    .filter(Boolean)
+                """
             )
 
-            cantidad = enlaces.count()
+            # =================================================
+            # ELIMINAR DUPLICADOS
+            # =================================================
 
-            urls_fotos = []
-
-            for i in range(cantidad):
-
-                href = enlaces.nth(i).get_attribute(
-                    "href"
-                )
-
-                if not href:
-                    continue
-
-                href = href.strip()
-
-                # Convertir URL relativa en absoluta
-                href = urljoin(
-                    page.url,
-                    href
-                )
-
-                if href not in urls_fotos:
-                    urls_fotos.append(href)
+            urls_fotos = list(
+                dict.fromkeys(urls_fotos)
+            )
 
             # =================================================
-            # SI NO HAY <a>, BUSCAR <img>
+            # SI NO HAY HREF, BUSCAR LOS SRC DE IMG
             # =================================================
 
             if not urls_fotos:
 
-                fotos_html = page.locator(
+                urls_fotos = page.locator(
                     "section.public-photo-gallery img"
+                ).evaluate_all(
+                    """
+                    elementos => elementos
+                        .map(e => e.src)
+                        .filter(Boolean)
+                    """
                 )
 
-                cantidad_fotos = fotos_html.count()
-
-                for i in range(cantidad_fotos):
-
-                    src = fotos_html.nth(i).get_attribute(
-                        "src"
-                    )
-
-                    if not src:
-                        continue
-
-                    src = src.strip()
-
-                    src = urljoin(
-                        page.url,
-                        src
-                    )
-
-                    if src not in urls_fotos:
-                        urls_fotos.append(src)
+                urls_fotos = list(
+                    dict.fromkeys(urls_fotos)
+                )
 
             # =================================================
-            # INFORMACIÓN DE DIAGNÓSTICO
-            # =================================================
-
-            st.write(
-                f"📸 Enlaces encontrados: "
-                f"{len(urls_fotos)}"
-            )
-
-            # =================================================
-            # DESCARGAR FOTOGRAFÍAS
+            # DESCARGAR DIRECTAMENTE LAS FOTOS
             # =================================================
 
             for url_foto in urls_fotos[:2]:
 
                 try:
 
-                    respuesta = page.request.get(
+                    respuesta = context.request.get(
                         url_foto,
-                        timeout=30000
-                    )
-
-                    if respuesta.ok:
-
-                        contenido = respuesta.body()
-
-                        if contenido:
-
-                            fotos.append(
-                                contenido
+                        timeout=30000,
+                        headers={
+                            "Referer": page.url,
+                            "Accept": (
+                                "image/avif,image/webp,image/apng,"
+                                "image/svg+xml,image/*,*/*;q=0.8"
                             )
-
-                except Exception as e:
-
-                    st.warning(
-                        f"⚠️ Error descargando foto: {e}"
+                        }
                     )
+
+                    if not respuesta.ok:
+                        continue
+
+                    contenido = respuesta.body()
+
+                    if not contenido:
+                        continue
+
+                    # =================================================
+                    # COMPROBAR QUE SEA UNA IMAGEN
+                    # =================================================
+
+                    try:
+
+                        imagen = PILImage.open(
+                            BytesIO(contenido)
+                        )
+
+                        imagen.verify()
+
+                        fotos.append(
+                            contenido
+                        )
+
+                    except Exception:
+
+                        continue
+
+                except Exception:
 
                     continue
 
             browser.close()
 
-            return fotos
+            return fotos[:2]
 
-    except Exception as e:
-
-        st.error(
-            f"❌ Error FieldService: {e}"
-        )
+    except Exception:
 
         return []
+
 # ============================================================
 # DESCARGAR UNA IMAGEN DESDE URL
 # ============================================================

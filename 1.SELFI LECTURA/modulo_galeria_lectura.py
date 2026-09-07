@@ -9,15 +9,9 @@ import re
 import asyncio
 import sys
 import subprocess
-from playwright.sync_api import sync_playwright
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A3, landscape
-from reportlab.platypus import (SimpleDocTemplate,Table,TableStyle,Image as RLImage,PageBreak,Paragraph)
-from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
-from PIL import Image as PILImage
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import html as html_lib
+import json
+import streamlit.components.v1 as components
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -416,456 +410,195 @@ def extraer_imagenes_sigof_paralelo(
 
     return resultados
 
-@st.cache_resource(show_spinner=False)
-def instalar_playwright_chromium():
-    try:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "playwright",
-                "install",
-                "chromium"
-            ],
-            check=True,
-            timeout=180
-        )
-        return True
-    except Exception as e:
-        st.error(f"❌ Error instalando Chromium: {e}")
-        return False
-
-@st.cache_data(show_spinner=False)
-def descargar_fotos_fieldservice(url):
-
-    if not instalar_playwright_chromium():
-        return []
-
-    fotos = []
-
-    try:
-
-        with sync_playwright() as p:
-
-            browser = p.chromium.launch(
-                headless=True
-            )
-
-            context = browser.new_context(
-                viewport={
-                    "width": 1400,
-                    "height": 1000
-                },
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/139.0.0.0 Safari/537.36"
-                ),
-                extra_http_headers={
-                    "Referer": url,
-                    "Origin": "https://servicios.distriluz.com.pe"
-                }
-            )
-
-            page = context.new_page()
-
-            # =====================================================
-            # 1. ABRIR FIELDSERVICE
-            # =====================================================
-
-            page.goto(
-                url,
-                wait_until="networkidle",
-                timeout=60000
-            )
-
-            page.wait_for_selector(
-                "section.public-photo-gallery img",
-                timeout=30000
-            )
-
-            page.wait_for_timeout(5000)
-
-            elementos_imagen = page.locator(
-                "section.public-photo-gallery img"
-            )
-
-            cantidad_imagenes = elementos_imagen.count()
-
-            st.write(
-                "📸 Imágenes encontradas en la galería:",
-                cantidad_imagenes
-            )
-
-            # =====================================================
-            # 2. OBTENER URLS DE LAS FOTOS
-            # =====================================================
-
-            urls_fotos = []
-
-            for indice in range(
-                min(cantidad_imagenes, 2)
-            ):
-
-                imagen_elemento = elementos_imagen.nth(indice)
-
-                url_foto = imagen_elemento.get_attribute(
-                    "src"
-                )
-
-                st.write(
-                    f"🔗 Foto {indice + 1}:",
-                    url_foto
-                )
-
-                if url_foto:
-                    urls_fotos.append(url_foto)
-
-            # =====================================================
-            # 3. PRUEBA DIRECTA CONTRA CLOUDFRONT
-            # =====================================================
-
-            for indice, url_foto in enumerate(
-                urls_fotos[:2]
-            ):
-
-                try:
-
-                    st.write(
-                        f"🌐 Probando CloudFront "
-                        f"directamente - Foto {indice + 1}"
-                    )
-
-                    respuesta = context.request.get(
-                        url_foto,
-                        headers={
-                            "Referer": url,
-                            "Origin": (
-                                "https://servicios.distriluz.com.pe"
-                            ),
-                            "User-Agent": (
-                                "Mozilla/5.0 "
-                                "(Windows NT 10.0; Win64; x64) "
-                                "AppleWebKit/537.36 "
-                                "(KHTML, like Gecko) "
-                                "Chrome/139.0.0.0 "
-                                "Safari/537.36"
-                            ),
-                            "Accept": (
-                                "image/avif,image/webp,"
-                                "image/apng,image/svg+xml,"
-                                "image/*,*/*;q=0.8"
-                            )
-                        },
-                        timeout=30000
-                    )
-
-                    # =================================================
-                    # DATOS DEL SERVIDOR CLOUDFRONT
-                    # =================================================
-
-                    st.write(
-                        f"📡 Foto {indice + 1} - "
-                        f"HTTP:",
-                        respuesta.status
-                    )
-
-                    st.write(
-                        f"📦 Foto {indice + 1} - "
-                        f"Content-Type:",
-                        respuesta.headers.get(
-                            "content-type"
-                        )
-                    )
-
-                    st.write(
-                        f"📏 Foto {indice + 1} - "
-                        f"Content-Length:",
-                        respuesta.headers.get(
-                            "content-length"
-                        )
-                    )
-
-                    st.write(
-                        f"🔐 Foto {indice + 1} - "
-                        f"Server:",
-                        respuesta.headers.get(
-                            "server"
-                        )
-                    )
-
-                    contenido = respuesta.body()
-
-                    st.write(
-                        f"📦 Foto {indice + 1} - "
-                        f"Bytes recibidos:",
-                        len(contenido)
-                    )
-
-                    # =================================================
-                    # MOSTRAR ALGUNOS HEADERS IMPORTANTES
-                    # =================================================
-
-                    st.write(
-                        f"🧾 Foto {indice + 1} - "
-                        f"Headers relevantes:",
-                        {
-                            "content-type": respuesta.headers.get(
-                                "content-type"
-                            ),
-                            "content-length": respuesta.headers.get(
-                                "content-length"
-                            ),
-                            "server": respuesta.headers.get(
-                                "server"
-                            ),
-                            "via": respuesta.headers.get(
-                                "via"
-                            ),
-                            "x-cache": respuesta.headers.get(
-                                "x-cache"
-                            ),
-                            "x-amz-cf-id": respuesta.headers.get(
-                                "x-amz-cf-id"
-                            ),
-                            "x-amz-cf-pop": respuesta.headers.get(
-                                "x-amz-cf-pop"
-                            )
-                        }
-                    )
-
-                    # =================================================
-                    # SI NO ES 200, NO INTENTAR PROCESAR
-                    # =================================================
-
-                    if respuesta.status != 200:
-
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            f"CloudFront respondió "
-                            f"HTTP {respuesta.status}"
-                        )
-
-                        # Mostrar el contenido devuelto si es texto
-                        try:
-
-                            texto = contenido[:1000].decode(
-                                "utf-8",
-                                errors="replace"
-                            )
-
-                            st.write(
-                                f"📄 Respuesta CloudFront "
-                                f"Foto {indice + 1}:",
-                                texto
-                            )
-
-                        except Exception:
-                            pass
-
-                        continue
-
-                    # =================================================
-                    # VALIDAR QUE HAYA CONTENIDO
-                    # =================================================
-
-                    if not contenido:
-
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "CloudFront devolvió 0 bytes"
-                        )
-
-                        continue
-
-                    # =================================================
-                    # VALIDAR IMAGEN
-                    # =================================================
-
-                    try:
-
-                        imagen = PILImage.open(
-                            BytesIO(contenido)
-                        )
-
-                        imagen.load()
-
-                        st.write(
-                            f"🖼️ Foto {indice + 1} - "
-                            f"Formato:",
-                            imagen.format
-                        )
-
-                        st.write(
-                            f"📐 Foto {indice + 1} - "
-                            f"Tamaño:",
-                            imagen.size
-                        )
-
-                        fotos.append(
-                            contenido
-                        )
-
-                        st.write(
-                            f"✅ Foto {indice + 1}: "
-                            "imagen válida"
-                        )
-
-                    except Exception as error_imagen:
-
-                        st.write(
-                            f"❌ Foto {indice + 1}: "
-                            "el contenido recibido "
-                            "NO es una imagen válida"
-                        )
-
-                        st.write(
-                            f"🔎 Detalle: "
-                            f"{error_imagen}"
-                        )
-
-                except Exception as error_request:
-
-                    st.write(
-                        f"❌ Foto {indice + 1} - "
-                        f"Error al consultar CloudFront:"
-                    )
-
-                    st.write(
-                        str(error_request)
-                    )
-
-            # =====================================================
-            # 4. CERRAR NAVEGADOR
-            # =====================================================
-
-            browser.close()
-
-            st.write(
-                "✅ Fotografías descargadas:",
-                len(fotos)
-            )
-
-            return fotos[:2]
-
-    except Exception as error:
-
-        st.error(
-            f"❌ Error FieldService: {error}"
-        )
-
-        return []
+
+# ============================================================
+# OBTENER FOTOS FIELDSERVICE EN PARALELO
+# ============================================================
+
+def obtener_fotos_fieldservice_paralelo(
+    urls,
+    trabajadores=10
+):
+
+    resultados = {}
+
+    urls_validas = []
+
+    for url in urls:
+
+        if not url:
+            continue
+
+        url = str(url).strip()
+
+        if not url:
+            continue
+
+        if "servicios.distriluz.com.pe/FieldService" not in url:
+            continue
+
+        urls_validas.append(url)
+
+    # Eliminar duplicados
+    urls_validas = list(
+        dict.fromkeys(urls_validas)
+    )
+
+    if not urls_validas:
+        return resultados
+
+    with ThreadPoolExecutor(
+        max_workers=trabajadores
+    ) as executor:
+
+        futuros = {
+            executor.submit(
+                obtener_urls_fotos_fieldservice,
+                url
+            ): url
+            for url in urls_validas
+        }
+
+        for futuro in as_completed(futuros):
+
+            url = futuros[futuro]
+
+            try:
+
+                resultados[url] = futuro.result()
+
+            except Exception:
+
+                resultados[url] = []
+
+    return resultados
+
+
+# ============================================================
+# OBTENER ENLACES DIRECTOS DE FOTOS FIELDSERVICE
+# MEDIANTE LA API
+# ============================================================
 
 @st.cache_data(show_spinner=False)
 def obtener_urls_fotos_fieldservice(url):
 
-    if not instalar_playwright_chromium():
+    if not url:
         return []
 
-    urls_fotos = []
-
-    try:
-
-        with sync_playwright() as p:
-
-            browser = p.chromium.launch(
-                headless=True
-            )
-
-            context = browser.new_context(
-                viewport={
-                    "width": 1400,
-                    "height": 1000
-                },
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/139.0.0.0 Safari/537.36"
-                )
-            )
-
-            page = context.new_page()
-
-            page.goto(
-                url,
-                wait_until="networkidle",
-                timeout=60000
-            )
-
-            page.wait_for_selector(
-                "section.public-photo-gallery img",
-                timeout=30000
-            )
-
-            page.wait_for_timeout(3000)
-
-            elementos_imagen = page.locator(
-                "section.public-photo-gallery img"
-            )
-
-            cantidad_imagenes = elementos_imagen.count()
-
-            for indice in range(
-                min(cantidad_imagenes, 2)
-            ):
-
-                imagen_elemento = elementos_imagen.nth(indice)
-
-                url_foto = imagen_elemento.get_attribute(
-                    "src"
-                )
-
-                if url_foto:
-                    urls_fotos.append(url_foto)
-
-            browser.close()
-
-            return urls_fotos[:2]
-
-    except Exception as error:
-
-        st.write(
-            f"❌ Error obteniendo URLs FieldService: {error}"
-        )
-
-        return []
-    
-# ============================================================
-# DESCARGAR UNA IMAGEN DESDE URL
-# ============================================================
-
-@st.cache_data(show_spinner=False)
-def descargar_imagen_url(url):
+    url = str(url).strip()
 
     if not url:
-        return None
+        return []
+
+    # --------------------------------------------------------
+    # Verificar que sea FieldService
+    # --------------------------------------------------------
+
+    if "servicios.distriluz.com.pe/FieldService" not in url:
+        return []
 
     try:
 
+        # ====================================================
+        # 1. OBTENER UUID
+        # ====================================================
+
+        uuid = url.rstrip("/").split("/")[-1]
+
+        if not uuid:
+            return []
+
+        # ====================================================
+        # 2. CONSTRUIR URL DE LA API
+        # ====================================================
+
+        url_api = (
+            "https://servicios.distriluz.com.pe:51000/"
+            "OptimusNGC_FieldService/api/reportes-publicos/fotos/"
+            + uuid
+        )
+
+        # ====================================================
+        # 3. CONSULTAR API
+        # ====================================================
+
         respuesta = requests.get(
-            url,
+            url_api,
             headers={
+                "Accept": "application/json",
                 "User-Agent": (
                     "Mozilla/5.0 "
                     "(Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 "
                     "(KHTML, like Gecko) "
-                    "Chrome/139.0 Safari/537.36"
+                    "Chrome/139.0.0.0 "
+                    "Safari/537.36"
                 )
             },
-            timeout=30,
-            allow_redirects=True
+            timeout=TIMEOUT
         )
 
-        respuesta.raise_for_status()
+        if respuesta.status_code != 200:
+            return []
 
-        if not respuesta.content:
-            return None
+        # ====================================================
+        # 4. LEER RESPUESTA
+        # ====================================================
 
-        return respuesta.content
+        json_texto = respuesta.text
+
+        if not json_texto:
+            return []
+
+        # ====================================================
+        # 5. EXTRAER LECTURA
+        # ====================================================
+
+        url_lectura = ""
+
+        patron_lectura = re.search(
+            r'"tipo"\s*:\s*"LECTURA".*?"url"\s*:\s*"([^"]+)"',
+            json_texto,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+
+        if patron_lectura:
+            url_lectura = patron_lectura.group(1).strip()
+
+        # ====================================================
+        # 6. EXTRAER MEDIDOR
+        # ====================================================
+
+        url_medidor = ""
+
+        patron_medidor = re.search(
+            r'"tipo"\s*:\s*"MEDIDOR".*?"url"\s*:\s*"([^"]+)"',
+            json_texto,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+
+        if patron_medidor:
+            url_medidor = patron_medidor.group(1).strip()
+
+        # ====================================================
+        # 7. DEVOLVER MÁXIMO 2 FOTOS
+        # ====================================================
+
+        urls_fotos = []
+
+        if url_lectura:
+            urls_fotos.append(url_lectura)
+
+        if url_medidor:
+            urls_fotos.append(url_medidor)
+
+        return urls_fotos[:2]
+
+    except requests.RequestException:
+        return []
 
     except Exception:
-        return None
+        return []
 
 
 # ============================================================
@@ -926,6 +659,7 @@ def mostrar_datos(
             f"**{nombre}:** {valor}"
         )
 
+
 # ============================================================
 # MOSTRAR FOTOS
 # ============================================================
@@ -952,7 +686,20 @@ def mostrar_fotos(
 
     if "servicios.distriluz.com.pe/FieldService" in url:
 
-        urls_fotos = obtener_urls_fotos_fieldservice(url)
+        # --------------------------------------------------------
+        # Si vienen las URLs desde session_state
+        # no volver a consultar la API.
+        # --------------------------------------------------------
+
+        if imagenes_sigof is not None:
+
+            urls_fotos = imagenes_sigof
+
+        else:
+
+            urls_fotos = obtener_urls_fotos_fieldservice(
+                url
+            )
 
         if urls_fotos:
 
@@ -974,14 +721,9 @@ def mostrar_fotos(
         else:
 
             st.warning(
-                "⚠️ No se pudieron obtener las fotografías."
+                "⚠️ No se pudieron obtener "
+                "las fotografías."
             )
-
-        # ====================================================
-        # IMPORTANTE:
-        # FieldService termina aquí.
-        # No debe continuar al proceso SIGOF.
-        # ====================================================
 
         return
 
@@ -1044,6 +786,7 @@ def mostrar_fotos(
                     imagen,
                     use_container_width=True
                 )
+
 
 # ============================================================
 # MOSTRAR UN REGISTRO
@@ -1112,59 +855,105 @@ def mostrar_registro(
                 language="text"
             )
 
+
 def mostrar_registro_progresivo(indice, fila, columnas_mostrar):
     """
     Muestra el registro inmediatamente y deja un espacio para
-    cargar posteriormente la fotografía SIGOF.
+    cargar posteriormente la fotografía SIGOF o FieldService.
     """
 
     url = fila.get("__url_foto")
 
     if isinstance(url, pd.Series):
+
         url = url.iloc[0] if not url.empty else ""
 
     if pd.isna(url):
+
         url = ""
 
     url = str(url).strip()
 
-    es_fieldservice = "servicios.distriluz.com.pe/FieldService" in url
+    placeholder_foto_resultado = None
+
+    es_fieldservice = (
+        "servicios.distriluz.com.pe/FieldService"
+        in url
+    )
 
     with st.container(border=True):
 
         # ========================================================
         # ENCABEZADO
         # ========================================================
-        st.markdown(f"### 📷 Registro {indice}")
+
+        st.markdown(
+            f"### 📷 Registro {indice}"
+        )
+
         st.divider()
 
         # ========================================================
         # ESPACIO PARA FOTOGRAFÍA
         # ========================================================
+
         placeholder_foto = st.empty()
 
-        if es_fieldservice:
-            # FIELD SERVICE SE MANTIENE EXACTAMENTE IGUAL
-            with placeholder_foto.container():
-                mostrar_fotos(
-                    url,
-                    imagenes_sigof=None
-                )
+        # ========================================================
+        # DETERMINAR CACHÉ SEGÚN EL TIPO DE FOTO
+        # ========================================================
 
-            placeholder_foto_resultado = None
+        if es_fieldservice:
+
+            imagenes = st.session_state.get(
+                "galeria_imagenes_fieldservice",
+                {}
+            ).get(url)
 
         else:
-            # SIGOF: primero mostramos el registro y el espacio
-            # para que la fotografía llegue posteriormente.
-            placeholder_foto.info("⏳ Cargando fotografía...")
 
-            placeholder_foto_resultado = placeholder_foto
+            imagenes = st.session_state.get(
+                "galeria_imagenes_sigof",
+                {}
+            ).get(url)
+
+        # ========================================================
+        # SI YA TENEMOS LAS FOTOS
+        # ========================================================
+
+        if imagenes is not None:
+
+            with placeholder_foto.container():
+
+                mostrar_fotos(
+                    url,
+                    imagenes_sigof=imagenes
+                )
+
+        # ========================================================
+        # SI TODAVÍA NO TENEMOS LAS FOTOS
+        # ========================================================
+
+        else:
+
+            placeholder_foto.info(
+                "⏳ Cargando fotografía..."
+            )
+
+            placeholder_foto_resultado = (
+                placeholder_foto
+            )
 
         # ========================================================
         # DATOS DEL REGISTRO
         # ========================================================
+
         for columna in columnas_mostrar:
-            valor = fila.get(columna, "")
+
+            valor = fila.get(
+                columna,
+                ""
+            )
 
             if pd.isna(valor):
                 valor = ""
@@ -1174,17 +963,646 @@ def mostrar_registro_progresivo(indice, fila, columnas_mostrar):
             )
 
         # ========================================================
-        # ENLACE ORIGINAL
+        # OBSERVACIÓN
         # ========================================================
-        if url:
-            with st.expander("🔗 Ver foto original"):
-                st.link_button(
-                    "Abrir fotografía original",
-                    url,
-                    use_container_width=True
-                )
+
+        observaciones = [
+            "Desenfocada",
+            "Sin observación",
+            "Foto borroso",
+            "Foto de lejos",
+            "Celular a Celular"
+        ]
+
+        st.selectbox(
+            "",
+            observaciones,
+            index=None,
+            placeholder="Seleccionar observación...",
+            key=f"observacion_foto_{indice}"
+        )
 
     return placeholder_foto_resultado
+
+
+# ============================================================
+# DETECTAR SI LA URL ES FIELDSERVICE
+# ============================================================
+
+def es_fieldservice(url):
+
+    if not url:
+        return False
+
+    return (
+        "servicios.distriluz.com.pe/FieldService"
+        in str(url)
+    )
+
+
+# ============================================================
+# GENERAR HTML PARA PDF DESDE EL NAVEGADOR
+# A3 HORIZONTAL
+# 1 REGISTRO POR PÁGINA
+# MÁXIMO 2 FOTOS POR REGISTRO
+# ============================================================
+
+def generar_html_pdf_navegador(df):
+
+    df = df.copy()
+
+    columnas_normalizadas = {}
+
+    for col in df.columns:
+
+        nombre = re.sub(
+            r"\s+",
+            " ",
+            str(col).strip().lower()
+        )
+
+        columnas_normalizadas[nombre] = col
+
+    def buscar_columna(*nombres):
+
+        for nombre in nombres:
+
+            nombre_normalizado = re.sub(
+                r"\s+",
+                " ",
+                nombre.strip().lower()
+            )
+
+            if (
+                nombre_normalizado
+                in columnas_normalizadas
+            ):
+
+                return columnas_normalizadas[
+                    nombre_normalizado
+                ]
+
+        return None
+
+    col_suministro = buscar_columna(
+        "suministro",
+        "nro suministro",
+        "n° suministro",
+        "numero suministro",
+        "número suministro"
+    )
+
+    col_medidor = buscar_columna(
+        "medidor",
+        "nro medidor",
+        "n° medidor",
+        "numero medidor",
+        "número medidor"
+    )
+
+    col_direccion = buscar_columna(
+        "direccion",
+        "dirección"
+    )
+
+    col_obs = buscar_columna(
+        "obs"
+    )
+
+    col_obs_descripcion = buscar_columna(
+        "obs_descripcion",
+        "obs descripcion",
+        "obs descripción",
+        "observacion descripcion",
+        "observación descripción"
+    )
+
+    col_lectura = buscar_columna(
+        "lectura"
+    )
+
+    def obtener_valor(
+        fila,
+        columna
+    ):
+
+        if not columna:
+            return ""
+
+        valor = fila.get(
+            columna,
+            ""
+        )
+
+        if pd.isna(valor):
+            return ""
+
+        if isinstance(valor, float):
+
+            if valor.is_integer():
+
+                return str(
+                    int(valor)
+                )
+
+            return str(valor)
+
+        return str(valor).strip()
+
+    def obtener_urls_fotos_pdf(url):
+
+        if not url:
+            return []
+
+        url = str(url).strip()
+
+        if es_fieldservice(url):
+
+            return st.session_state.get(
+                "galeria_imagenes_fieldservice",
+                {}
+            ).get(
+                url,
+                []
+            )[:2]
+
+        return st.session_state.get(
+            "galeria_imagenes_sigof",
+            {}
+        ).get(
+            url,
+            []
+        )[:2]
+
+    paginas = []
+
+    for indice, (_, fila) in enumerate(
+        df.iterrows(),
+        start=1
+    ):
+
+        suministro = obtener_valor(
+            fila,
+            col_suministro
+        )
+
+        medidor = obtener_valor(
+            fila,
+            col_medidor
+        )
+
+        direccion = obtener_valor(
+            fila,
+            col_direccion
+        )
+
+        obs = obtener_valor(
+            fila,
+            col_obs
+        )
+
+        obs_descripcion = obtener_valor(
+            fila,
+            col_obs_descripcion
+        )
+
+        lectura = obtener_valor(
+            fila,
+            col_lectura
+        )
+
+        url_foto = obtener_valor(
+            fila,
+            "__url_foto"
+        )
+
+        fotos = obtener_urls_fotos_pdf(
+            url_foto
+        )
+
+        suministro_html = html_lib.escape(
+            suministro
+        )
+
+        medidor_html = html_lib.escape(
+            medidor
+        )
+
+        direccion_html = html_lib.escape(
+            direccion
+        )
+
+        obs_html = html_lib.escape(
+            obs
+        )
+
+        obs_descripcion_html = html_lib.escape(
+            obs_descripcion
+        )
+
+        lectura_html = html_lib.escape(
+            lectura
+        )
+
+        celdas_fotos = []
+
+        for posicion in range(2):
+
+            if posicion < len(fotos):
+
+                url_imagen = html_lib.escape(
+                    str(fotos[posicion]).strip(),
+                    quote=True
+                )
+
+                celdas_fotos.append(
+                    f"""
+                    <td class="celda-foto">
+                        <img
+                            src="{url_imagen}"
+                            alt="Foto {posicion + 1}"
+                        >
+                    </td>
+                    """
+                )
+
+            else:
+
+                celdas_fotos.append(
+                    """
+                    <td class="celda-foto">
+                        <div class="sin-foto">
+                            Sin fotografía
+                        </div>
+                    </td>
+                    """
+                )
+
+        pagina = f"""
+        <section class="registro">
+
+            <div class="titulo-registro">
+                📷 Registro {indice}
+            </div>
+
+            <table class="tabla">
+
+                <thead>
+                    <tr>
+                        <th>SUMINISTRO</th>
+                        <th>MEDIDOR</th>
+                        <th>DIRECCIÓN</th>
+                        <th>OBS</th>
+                        <th>OBS_DESCRIPCION</th>
+                        <th>LECTURA</th>
+                        <th>FOTO 1</th>
+                        <th>FOTO 2</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    <tr>
+
+                        <td>
+                            {suministro_html}
+                        </td>
+
+                        <td>
+                            {medidor_html}
+                        </td>
+
+                        <td>
+                            {direccion_html}
+                        </td>
+
+                        <td>
+                            {obs_html}
+                        </td>
+
+                        <td>
+                            {obs_descripcion_html}
+                        </td>
+
+                        <td>
+                            {lectura_html}
+                        </td>
+
+                        {celdas_fotos[0]}
+
+                        {celdas_fotos[1]}
+
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </section>
+        """
+
+        paginas.append(
+            pagina
+        )
+
+    contenido = "\n".join(
+        paginas
+    )
+
+    contenido_json = json.dumps(
+        contenido,
+        ensure_ascii=False
+    )
+
+    html_documento = f"""
+<!DOCTYPE html>
+
+<html lang="es">
+
+<head>
+
+<meta charset="UTF-8">
+
+<style>
+
+@page {{
+    size: A3 landscape;
+    margin: 8mm;
+}}
+
+* {{
+    box-sizing: border-box;
+}}
+
+html,
+body {{
+    margin: 0;
+    padding: 0;
+    font-family: Arial, Helvetica, sans-serif;
+}}
+
+body {{
+    background: white;
+}}
+
+#barra {{
+    width: 100%;
+    padding: 12px;
+    text-align: center;
+}}
+
+#btn_pdf {{
+    border: none;
+    border-radius: 6px;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    background: #ff4b4b;
+    color: white;
+}}
+
+#btn_pdf:hover {{
+    opacity: 0.9;
+}}
+
+#estado {{
+    margin-top: 8px;
+    font-size: 13px;
+}}
+
+#contenido_pdf {{
+    display: none;
+}}
+
+.registro {{
+    width: 100%;
+    min-height: 281mm;
+    page-break-after: always;
+    break-after: page;
+    overflow: visible;
+    padding: 0;
+}}
+
+.registro:last-child {{
+    page-break-after: auto;
+    break-after: auto;
+}}
+
+.titulo-registro {{
+    font-size: 18px;
+    font-weight: bold;
+    text-align: left;
+    margin-bottom: 5mm;
+}}
+
+.tabla {{
+    width: 100%;
+    min-width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}}
+
+.tabla th,
+.tabla td {{
+    border: 0.7px solid #000;
+    padding: 2mm;
+    text-align: center;
+    vertical-align: middle;
+    word-break: break-word;
+}}
+
+.tabla th {{
+    background: #D9E1F2;
+    font-size: 10px;
+    font-weight: bold;
+    height: 12mm;
+}}
+
+.tabla td {{
+    font-size: 10px;
+}}
+
+.tabla th:nth-child(7),
+.tabla td:nth-child(7),
+.tabla th:nth-child(8),
+.tabla td:nth-child(8){{
+    width: 124mm !important;
+    min-width: 124mm !important;
+    max-width: 124mm !important;
+    padding: 1mm !important;
+    margin: 0 !important;
+}}
+
+.celda-foto {{
+    padding: 1mm !important;
+    vertical-align: middle;
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+}}
+
+.celda-foto img {{
+    display: block;
+    width: 120mm;
+    max-width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0;
+}}
+
+.sin-foto {{
+    color: #777;
+    font-size: 10px;
+}}
+
+@media print {{
+
+    #barra {{
+        display: none !important;
+    }}
+
+    #contenido_pdf {{
+        display: block !important;
+    }}
+
+    body {{
+        margin: 0;
+        padding: 0;
+    }}
+
+}}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="barra">
+
+    <button
+        id="btn_pdf"
+        onclick="generarPDF()"
+    >
+        📥 Generar PDF con Fotos
+    </button>
+
+    <div id="estado">
+        El PDF se abrirá mediante el navegador.
+        Seleccione <b>Guardar como PDF</b>.
+    </div>
+
+</div>
+
+<div
+    id="contenido_pdf"
+>
+</div>
+
+<script>
+
+const contenido = {contenido_json};
+
+async function esperarImagenes() {{
+
+    const imagenes = Array.from(
+        document.querySelectorAll(
+            "#contenido_pdf img"
+        )
+    );
+
+    await Promise.all(
+        imagenes.map(
+            imagen => new Promise(
+                resolve => {{
+
+                    if (imagen.complete) {{
+
+                        resolve();
+
+                        return;
+                    }}
+
+                    imagen.onload = resolve;
+
+                    imagen.onerror = resolve;
+
+                }}
+            )
+        )
+    );
+
+}}
+
+async function generarPDF() {{
+
+    const boton = document.getElementById(
+        "btn_pdf"
+    );
+
+    const estado = document.getElementById(
+        "estado"
+    );
+
+    const contenidoPDF = document.getElementById(
+        "contenido_pdf"
+    );
+
+    boton.disabled = true;
+
+    boton.innerText =
+        "⏳ Preparando PDF...";
+
+    estado.innerText =
+        "Cargando las fotografías ya obtenidas...";
+
+    contenidoPDF.innerHTML = contenido;
+
+    await esperarImagenes();
+
+    estado.innerText =
+        "Abriendo el diálogo de impresión...";
+
+    await new Promise(
+        resolve => setTimeout(
+            resolve,
+            300
+        )
+    );
+
+    window.print();
+
+    boton.disabled = false;
+
+    boton.innerText =
+        "📥 Generar PDF con Fotos";
+
+    estado.innerHTML =
+        "Seleccione <b>Guardar como PDF</b> para descargarlo.";
+
+}}
+
+window.onafterprint = function() {{
+
+    const contenidoPDF =
+        document.getElementById(
+            "contenido_pdf"
+        );
+
+    contenidoPDF.innerHTML = "";
+
+}};
+
+</script>
+
+</body>
+
+</html>
+"""
+
+    return html_documento
+
 
 # ============================================================
 # FUNCIÓN PRINCIPAL
@@ -1593,17 +2011,23 @@ def ejecutar_galeria_lectura():
     )
 
     # ============================================================
-    # PREPARAR CONSULTAS SIGOF EN PARALELO
+    # PREPARAR CONSULTAS SIGOF Y FIELDSERVICE
     # ============================================================
 
     urls_sigof = []
+    urls_fieldservice = []
 
     for _, fila in registros:
 
         url = fila.get("__url_foto")
 
         if isinstance(url, pd.Series):
-            url = url.iloc[0] if not url.empty else ""
+
+            url = (
+                url.iloc[0]
+                if not url.empty
+                else ""
+            )
 
         if pd.isna(url):
             continue
@@ -1613,13 +2037,68 @@ def ejecutar_galeria_lectura():
         if not url:
             continue
 
-        # Solo SIGOF
-        if "servicios.distriluz.com.pe/FieldService" not in url:
+        # --------------------------------------------------------
+        # FIELDSERVICE
+        # --------------------------------------------------------
+
+        if "servicios.distriluz.com.pe/FieldService" in url:
+
+            urls_fieldservice.append(url)
+
+        # --------------------------------------------------------
+        # SIGOF
+        # --------------------------------------------------------
+
+        else:
+
             urls_sigof.append(url)
 
     # Eliminar URLs repetidas
-    urls_sigof = list(dict.fromkeys(urls_sigof))
 
+    urls_sigof = list(
+        dict.fromkeys(urls_sigof)
+    )
+
+    urls_fieldservice = list(
+        dict.fromkeys(urls_fieldservice)
+    )
+
+    # ============================================================
+    # INICIALIZAR CACHÉ DE FOTOS
+    # ============================================================
+
+    if "galeria_imagenes_sigof" not in st.session_state:
+
+        st.session_state.galeria_imagenes_sigof = {}
+
+    if "galeria_imagenes_fieldservice" not in st.session_state:
+
+        st.session_state.galeria_imagenes_fieldservice = {}
+
+    # ============================================================
+    # CONSULTAS FIELDSERVICE EN PARALELO
+    # ============================================================
+
+    futuros_fieldservice = {}
+
+    executor_fieldservice = ThreadPoolExecutor(
+        max_workers=10
+    )
+
+    for url in urls_fieldservice:
+
+        # No volver a consultar si ya está guardado
+
+        if url in st.session_state.galeria_imagenes_fieldservice:
+
+            continue
+
+        futuro = executor_fieldservice.submit(
+            obtener_urls_fotos_fieldservice,
+            url
+        )
+
+        futuros_fieldservice[futuro] = url
 
     # ============================================================
     # CREAR CONSULTAS SIGOF
@@ -1627,9 +2106,17 @@ def ejecutar_galeria_lectura():
 
     futuros_sigof = {}
 
-    executor = ThreadPoolExecutor(max_workers=10)
+    executor = ThreadPoolExecutor(
+        max_workers=10
+    )
 
     for url in urls_sigof:
+
+        # Si ya tenemos las fotos, no volver a obtenerlas
+
+        if url in st.session_state.galeria_imagenes_sigof:
+
+            continue
 
         futuro = executor.submit(
             extraer_imagenes,
@@ -1638,13 +2125,12 @@ def ejecutar_galeria_lectura():
 
         futuros_sigof[futuro] = url
 
-
     # ============================================================
     # MOSTRAR GALERÍA INMEDIATAMENTE
     # ============================================================
 
     placeholders_sigof = {}
-
+    placeholders_fieldservice = {}
 
     for posicion in range(0, len(registros), 2):
 
@@ -1669,18 +2155,32 @@ def ejecutar_galeria_lectura():
                 url = fila.get("__url_foto")
 
                 if isinstance(url, pd.Series):
-                    url = url.iloc[0] if not url.empty else ""
+
+                    url = (
+                        url.iloc[0]
+                        if not url.empty
+                        else ""
+                    )
 
                 if pd.notna(url):
 
                     url = str(url).strip()
 
                     if url:
-                        placeholders_sigof.setdefault(
-                            url,
-                            []
-                        ).append(placeholder)
 
+                        if "servicios.distriluz.com.pe/FieldService" in url:
+
+                            placeholders_fieldservice.setdefault(
+                                url,
+                                []
+                            ).append(placeholder)
+
+                        else:
+
+                            placeholders_sigof.setdefault(
+                                url,
+                                []
+                            ).append(placeholder)
 
         # --------------------------------------------------------
         # REGISTRO DERECHO
@@ -1703,18 +2203,32 @@ def ejecutar_galeria_lectura():
                     url = fila.get("__url_foto")
 
                     if isinstance(url, pd.Series):
-                        url = url.iloc[0] if not url.empty else ""
+
+                        url = (
+                            url.iloc[0]
+                            if not url.empty
+                            else ""
+                        )
 
                     if pd.notna(url):
 
                         url = str(url).strip()
 
                         if url:
-                            placeholders_sigof.setdefault(
-                                url,
-                                []
-                            ).append(placeholder)
 
+                            if "servicios.distriluz.com.pe/FieldService" in url:
+
+                                placeholders_fieldservice.setdefault(
+                                    url,
+                                    []
+                                ).append(placeholder)
+
+                            else:
+
+                                placeholders_sigof.setdefault(
+                                    url,
+                                    []
+                                ).append(placeholder)
 
     # ============================================================
     # ACTUALIZAR LAS FOTOGRAFÍAS A MEDIDA QUE TERMINAN
@@ -1734,7 +2248,10 @@ def ejecutar_galeria_lectura():
 
                 imagenes = []
 
-            # Buscar todos los registros que usan esta misma URL
+            # Guardar las imágenes SIGOF para los siguientes reruns
+
+            st.session_state.galeria_imagenes_sigof[url] = imagenes
+
             placeholders = placeholders_sigof.get(
                 url,
                 []
@@ -1789,53 +2306,119 @@ def ejecutar_galeria_lectura():
                                     )
 
     finally:
-        executor.shutdown(wait=True)
 
-    # ========================================================
-    # SIGUIENTE BLOQUE
-    # ========================================================
-
-    if fotos_hasta < total_filtrado:
-
-        restantes = (
-            total_filtrado -
-            fotos_hasta
+        executor.shutdown(
+            wait=True
         )
 
-        siguiente = min(
-            TAMANO_BLOQUE,
-            restantes
-        )
+    # ============================================================
+    # ACTUALIZAR FOTOGRAFÍAS FIELDSERVICE
+    # ============================================================
 
-        st.divider()
+    try:
 
-        st.info(
-            f"📦 Ya se cargaron {fotos_hasta:,} "
-            f"registros. "
-            f"Quedan {restantes:,}."
-        )
-
-        if st.button(
-            f"🚀 Cargar siguientes {siguiente} registros",
-            type="primary",
-            use_container_width=True,
-            key=f"btn_siguiente_{fotos_hasta}"
+        for futuro in as_completed(
+            futuros_fieldservice
         ):
 
-            st.session_state.galeria_fotos_hasta = (
-                fotos_hasta + siguiente
+            url = futuros_fieldservice[futuro]
+
+            try:
+
+                urls_fotos = futuro.result()
+
+            except Exception:
+
+                urls_fotos = []
+
+            # ----------------------------------------------------
+            # GUARDAR RESULTADO
+            # ----------------------------------------------------
+
+            st.session_state.galeria_imagenes_fieldservice[
+                url
+            ] = urls_fotos
+
+            # ----------------------------------------------------
+            # ACTUALIZAR LOS PLACEHOLDERS
+            # ----------------------------------------------------
+
+            placeholders = placeholders_fieldservice.get(
+                url,
+                []
             )
 
-            st.rerun()
+            for placeholder in placeholders:
 
-    else:
+                placeholder.empty()
 
-        st.divider()
+                with placeholder.container():
 
-        st.success(
-            f"✅ Se han mostrado los "
-            f"{total_filtrado:,} registros filtrados."
+                    if not urls_fotos:
+
+                        st.warning(
+                            "⚠️ No se pudieron obtener "
+                            "las fotografías."
+                        )
+
+                    else:
+
+                        mostrar_fotos(
+                            url,
+                            imagenes_sigof=urls_fotos
+                        )
+
+    finally:
+
+        executor_fieldservice.shutdown(
+            wait=True
         )
+
+        # ========================================================
+        # SIGUIENTE BLOQUE
+        # ========================================================
+
+        if fotos_hasta < total_filtrado:
+
+            restantes = (
+                total_filtrado -
+                fotos_hasta
+            )
+
+            siguiente = min(
+                TAMANO_BLOQUE,
+                restantes
+            )
+
+            st.divider()
+
+            st.info(
+                f"📦 Ya se cargaron {fotos_hasta:,} "
+                f"registros. "
+                f"Quedan {restantes:,}."
+            )
+
+            if st.button(
+                f"🚀 Cargar siguientes {siguiente} registros",
+                type="primary",
+                use_container_width=True,
+                key=f"btn_siguiente_{fotos_hasta}"
+            ):
+
+                st.session_state.galeria_fotos_hasta = (
+                    fotos_hasta + siguiente
+                )
+
+                st.rerun()
+
+        else:
+
+            st.divider()
+
+            st.success(
+                f"✅ Se han mostrado los "
+                f"{total_filtrado:,} registros filtrados."
+            )
 
     # ========================================================
     # EXPORTAR PDF CON FOTOS
@@ -1851,958 +2434,107 @@ def ejecutar_galeria_lectura():
         "por registro."
     )
 
-    if st.button(
-        "📥 Generar PDF con Fotos",
-        type="primary",
-        use_container_width=True,
-        key="btn_generar_pdf_fotos"
-    ):
+    # ========================================================
+    # BOTONES DE EXPORTACIÓN
+    # ========================================================
 
-        with st.spinner(
-            "📄 Generando PDF..."
+    col_pdf, col_excel = st.columns(2)
+
+    # ========================================================
+    # GENERAR PDF DESDE EL NAVEGADOR
+    # ========================================================
+
+    with col_pdf:
+
+        html_pdf = generar_html_pdf_navegador(
+            registros_a_mostrar
+        )
+
+        components.html(
+            html_pdf,
+            height=80,
+            scrolling=False
+        )
+
+    # ========================================================
+    # DESCARGAR EXCEL
+    # ========================================================
+
+    with col_excel:
+
+        # Crear una copia de los registros filtrados
+
+        df_excel = df_filtrado.copy()
+
+        # ====================================================
+        # AGREGAR OBSERVACIÓN DE CADA FOTOGRAFÍA
+        # ====================================================
+
+        observaciones_excel = []
+
+        for posicion, (indice_real, fila) in enumerate(
+            df_excel.iterrows(),
+            start=1
         ):
 
-            try:
-
-                pdf = generar_pdf_con_fotos(
-                    df_filtrado
-                )
-
-                st.download_button(
-                    label="⬇️ Descargar PDF",
-                    data=pdf,
-                    file_name="galeria_lectura.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="btn_descargar_pdf"
-                )
-
-                st.success(
-                    "✅ PDF generado correctamente."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"❌ Error al generar el PDF:\n\n{e}"
-                )
-
-
-# ============================================================
-# DETECTAR SI LA URL ES FIELDSERVICE
-# ============================================================
-
-def es_fieldservice(url):
-
-    if not url:
-        return False
-
-    return (
-        "servicios.distriluz.com.pe/FieldService"
-        in str(url)
-    )
-
-
-# ============================================================
-# GENERAR PDF A3 HORIZONTAL
-# 1 REGISTRO POR PÁGINA
-# MÁXIMO 2 FOTOS POR REGISTRO
-# ============================================================
-
-def generar_pdf_con_fotos(df):
-
-    archivo_salida = BytesIO()
-
-    # ========================================================
-    # A3 HORIZONTAL
-    # ========================================================
-
-    ancho_pagina, alto_pagina = landscape(A3)
-
-    margen = 0.8 * cm
-
-    doc = SimpleDocTemplate(
-        archivo_salida,
-        pagesize=landscape(A3),
-        leftMargin=margen,
-        rightMargin=margen,
-        topMargin=margen,
-        bottomMargin=margen
-    )
-
-    elementos = []
-
-    # ========================================================
-    # ESTILOS
-    # ========================================================
-
-    estilo_encabezado = ParagraphStyle(
-        "EncabezadoPDF",
-        fontName="Helvetica-Bold",
-        fontSize=8,
-        leading=9,
-        alignment=TA_CENTER
-    )
-
-    estilo_dato = ParagraphStyle(
-        "DatoPDF",
-        fontName="Helvetica",
-        fontSize=8,
-        leading=9,
-        alignment=TA_CENTER,
-        wordWrap="CJK"
-    )
-
-    # ========================================================
-    # COLUMNAS
-    # ========================================================
-
-    df = df.copy()
-
-    columnas_normalizadas = {}
-
-    for col in df.columns:
-
-        nombre = re.sub(
-            r"\s+",
-            " ",
-            str(col).strip().lower()
-        )
-
-        columnas_normalizadas[nombre] = col
-
-    def buscar_columna(*nombres):
-
-        for nombre in nombres:
-
-            nombre_normalizado = re.sub(
-                r"\s+",
-                " ",
-                nombre.strip().lower()
+            observacion = st.session_state.get(
+                f"observacion_foto_{posicion}",
+                ""
             )
 
-            if (
-                nombre_normalizado
-                in columnas_normalizadas
-            ):
+            # Si quedó en la opción inicial, dejar vacío
 
-                return columnas_normalizadas[
-                    nombre_normalizado
-                ]
+            if observacion == "Seleccionar observación...":
 
-        return None
+                observacion = ""
 
-    col_suministro = buscar_columna(
-        "suministro",
-        "nro suministro",
-        "n° suministro",
-        "numero suministro",
-        "número suministro"
-    )
+            observaciones_excel.append(
+                observacion
+            )
 
-    col_medidor = buscar_columna(
-        "medidor",
-        "nro medidor",
-        "n° medidor",
-        "numero medidor",
-        "número medidor"
-    )
+        df_excel["Observacion_foto"] = observaciones_excel
 
-    col_direccion = buscar_columna(
-        "direccion",
-        "dirección"
-    )
+        # ====================================================
+        # ELIMINAR COLUMNA INTERNA
+        # ====================================================
 
-    col_obs = buscar_columna(
-        "obs"
-    )
+        if "__url_foto" in df_excel.columns:
 
-    col_obs_descripcion = buscar_columna(
-        "obs_descripcion",
-        "obs descripcion",
-        "obs descripción",
-        "observacion descripcion",
-        "observación descripción"
-    )
+            df_excel = df_excel.drop(
+                columns=["__url_foto"]
+            )
 
-    col_lectura = buscar_columna(
-        "lectura"
-    )
+        # ====================================================
+        # CREAR EXCEL EN MEMORIA
+        # ====================================================
 
-    # ========================================================
-    # OBTENER VALOR
-    # ========================================================
+        excel_salida = BytesIO()
 
-    def obtener_valor(
-        fila,
-        columna
-    ):
+        with pd.ExcelWriter(
+            excel_salida,
+            engine="openpyxl"
+        ) as writer:
 
-        if not columna:
-            return ""
+            df_excel.to_excel(
+                writer,
+                index=False,
+                sheet_name="Galeria Lectura"
+            )
 
-        valor = fila.get(
-            columna,
-            ""
+        excel_salida.seek(0)
+
+        # ====================================================
+        # BOTÓN
+        # ====================================================
+
+        st.download_button(
+            label="📊 Descargar Excel",
+            data=excel_salida,
+            file_name="galeria_lectura.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+            key="btn_descargar_excel"
         )
-
-        if pd.isna(valor):
-            return ""
-
-        if isinstance(valor, float):
-
-            if valor.is_integer():
-
-                return str(
-                    int(valor)
-                )
-
-            return str(valor)
-
-        return str(valor).strip()
-
-  
-    # ========================================================
-    # DESCARGAR UNA IMAGEN PARA EL PDF
-    # ========================================================
-
-    def descargar_imagen_para_pdf(
-        url_imagen,
-        url_origen=None
-    ):
-
-        if not url_imagen:
-            return None
-
-        try:
-
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) "
-                    "Chrome/139.0.0.0 "
-                    "Safari/537.36"
-                ),
-                "Accept": (
-                    "image/avif,image/webp,"
-                    "image/apng,image/svg+xml,"
-                    "image/*,*/*;q=0.8"
-                )
-            }
-
-            # ------------------------------------------------
-            # Si viene de FieldService
-            # ------------------------------------------------
-
-            if url_origen:
-
-                headers["Referer"] = url_origen
-
-                headers["Origin"] = (
-                    "https://servicios.distriluz.com.pe" 
-                ) 
- 
-            respuesta = requests.get( 
-                url_imagen, 
-                headers=headers, 
-                timeout=30, 
-                allow_redirects=True 
-            ) 
- 
-            if respuesta.status_code != 200: 
-                return None 
- 
-            contenido = respuesta.content 
- 
-            if not contenido: 
-                return None 
- 
-            # ------------------------------------------------ 
-            # VALIDAR QUE REALMENTE SEA UNA IMAGEN 
-            # ------------------------------------------------ 
- 
-            try: 
- 
-                imagen = PILImage.open( 
-                    BytesIO(contenido) 
-                ) 
- 
-                imagen.load() 
- 
-                return contenido 
- 
-            except Exception: 
- 
-                return None 
- 
-        except Exception: 
- 
-            return None 
- 
- 
-    # ======================================================== 
-    # OBTENER LAS FOTOS DEL REGISTRO 
-    # ======================================================== 
- 
-    def obtener_fotos_pdf(url): 
- 
-        if not url: 
-            return [] 
- 
-        url = str(url).strip() 
- 
-        if not url: 
-            return [] 
- 
-        try: 
- 
-            # ================================================= 
-            # FIELDSERVICE 
-            # ================================================= 
- 
-            if es_fieldservice(url): 
- 
-                # ------------------------------------------------- 
-                # IMPORTANTE: 
-                # NO descargar directamente desde CloudFront 
-                # usando descargar_fotos_fieldservice(). 
-                # 
-                # Primero obtenemos las URLs desde FieldService. 
-                # ------------------------------------------------- 
- 
-                urls_fotos = ( 
-                    obtener_urls_fotos_fieldservice( 
-                        url 
-                    ) 
-                ) 
- 
-                if not urls_fotos: 
-                    return [] 
- 
-                fotos = [] 
- 
-                # ------------------------------------------------- 
-                # Descargar máximo 2 fotografías 
-                # ------------------------------------------------- 
- 
-                for url_foto in urls_fotos[:2]: 
- 
-                    contenido = ( 
-                        descargar_imagen_para_pdf( 
-                            url_foto, 
-                            url 
-                        ) 
-                    ) 
- 
-                    if contenido: 
- 
-                        fotos.append( 
-                            contenido 
-                        ) 
- 
-                return fotos[:2] 
- 
- 
-            # ================================================= 
-            # SIGOF 
-            # ================================================= 
- 
-            imagenes = extraer_imagenes( 
-                url 
-            ) 
- 
-            if not imagenes: 
-                return [] 
- 
-            fotos = [] 
- 
-            for imagen_url in imagenes[:2]: 
- 
-                contenido = ( 
-                    descargar_imagen_para_pdf( 
-                        imagen_url 
-                    ) 
-                ) 
- 
-                if contenido: 
- 
-                    fotos.append( 
-                        contenido 
-                    ) 
- 
-            return fotos[:2] 
- 
-        except Exception: 
- 
-            return [] 
- 
-    # ======================================================== 
-    # ÁREA DISPONIBLE 
-    # ======================================================== 
- 
-    ancho_util = ( 
-        ancho_pagina 
-        - doc.leftMargin 
-        - doc.rightMargin 
-    ) 
- 
-    alto_util = ( 
-        alto_pagina 
-        - doc.topMargin 
-        - doc.bottomMargin 
-    ) 
- 
-    # ======================================================== 
-    # RECORRER REGISTROS 
-    # ======================================================== 
- 
-    total_registros = len(df) 
- 
-    for indice, (_, fila) in enumerate( 
-        df.iterrows() 
-    ): 
- 
-        # ==================================================== 
-        # DATOS 
-        # ==================================================== 
- 
-        suministro = obtener_valor( 
-            fila, 
-            col_suministro 
-        ) 
- 
-        medidor = obtener_valor( 
-            fila, 
-            col_medidor 
-        ) 
- 
-        direccion = obtener_valor( 
-            fila, 
-            col_direccion 
-        ) 
- 
-        obs = obtener_valor( 
-            fila, 
-            col_obs 
-        ) 
- 
-        obs_descripcion = obtener_valor( 
-            fila, 
-            col_obs_descripcion 
-        ) 
- 
-        lectura = obtener_valor( 
-            fila, 
-            col_lectura 
-        ) 
- 
-        # ==================================================== 
-        # OBTENER URL REAL DEL HYPERLINK 
-        # ==================================================== 
- 
-        url_foto = obtener_valor( 
-            fila, 
-            "__url_foto" 
-        ) 
- 
-        # ==================================================== 
-        # OBTENER FOTOS 
-        # ==================================================== 
- 
-        fotos = obtener_fotos_pdf( 
-            url_foto 
-        ) 
- 
-        # ==================================================== 
-        # PREPARAR FOTOS 
-        # ==================================================== 
- 
-        fotos_pdf = [] 
- 
-        for contenido in fotos: 
- 
-            try: 
- 
-                imagen_original = PILImage.open( 
-                    BytesIO(contenido) 
-                ) 
- 
-                imagen_original.load() 
- 
-                ancho_original = imagen_original.width 
- 
-                alto_original = imagen_original.height 
- 
-                # -------------------------------------------- 
-                # CONVERTIR A RGB 
-                # -------------------------------------------- 
- 
-                if imagen_original.mode != "RGB": 
- 
-                    if "A" in imagen_original.getbands(): 
- 
-                        fondo = PILImage.new( 
-                            "RGB", 
-                            imagen_original.size, 
-                            "white" 
-                        ) 
- 
-                        fondo.paste( 
-                            imagen_original, 
-                            mask=imagen_original.getchannel("A") 
-                        ) 
- 
-                        imagen_original = fondo 
- 
-                    else: 
- 
-                        imagen_original = ( 
-                            imagen_original.convert( 
-                                "RGB" 
-                            ) 
-                        ) 
- 
-                # -------------------------------------------- 
-                # JPEG EN MEMORIA 
-                # -------------------------------------------- 
- 
-                buffer = BytesIO() 
- 
-                imagen_original.save( 
-                    buffer, 
-                    format="JPEG", 
-                    quality=92 
-                ) 
- 
-                buffer.seek(0) 
- 
-                fotos_pdf.append( 
-                    { 
-                        "buffer": buffer, 
-                        "ancho": ancho_original, 
-                        "alto": alto_original 
-                    } 
-                ) 
- 
-            except Exception: 
- 
-                continue 
- 
-        # ==================================================== 
-        # MÁXIMO 2 
-        # ==================================================== 
- 
-        fotos_pdf = fotos_pdf[:2] 
- 
-        cantidad_fotos = len( 
-            fotos_pdf 
-        ) 
- 
-        # ==================================================== 
-        # ANCHOS BASE DE DATOS 
-        # ==================================================== 
- 
-        anchos_datos = [ 
-            2.5 * cm, 
-            2.7 * cm, 
-            4.0 * cm, 
-            2.2 * cm, 
-            4.0 * cm, 
-            2.7 * cm 
-        ] 
- 
-        ancho_datos = sum( 
-            anchos_datos 
-        ) 
- 
-        ancho_fotos = max( 
-            1 * cm, 
-            ancho_util - ancho_datos 
-        ) 
- 
-        # ==================================================== 
-        # DISTRIBUIR ANCHO DE FOTOS 
-        # ==================================================== 
- 
-        if cantidad_fotos == 2: 
- 
-            proporcion1 = ( 
-                fotos_pdf[0]["ancho"] 
-                / fotos_pdf[0]["alto"] 
-            ) 
- 
-            proporcion2 = ( 
-                fotos_pdf[1]["ancho"] 
-                / fotos_pdf[1]["alto"] 
-            ) 
- 
-            suma = ( 
-                proporcion1 
-                + proporcion2 
-            ) 
- 
-            ancho_foto1 = ( 
-                ancho_fotos 
-                * proporcion1 
-                / suma 
-            ) 
- 
-            ancho_foto2 = ( 
-                ancho_fotos 
-                * proporcion2 
-                / suma 
-            ) 
- 
-        elif cantidad_fotos == 1: 
- 
-            ancho_foto1 = ancho_fotos 
-            ancho_foto2 = 0 
- 
-        else: 
- 
-            ancho_foto1 = 0 
-            ancho_foto2 = 0 
- 
-        # ==================================================== 
-        # CALCULAR ALTURA 
-        # ==================================================== 
- 
-        alturas = [] 
- 
-        if cantidad_fotos >= 1: 
- 
-            alturas.append( 
-                ancho_foto1 
-                * fotos_pdf[0]["alto"] 
-                / fotos_pdf[0]["ancho"] 
-            ) 
- 
-        if cantidad_fotos >= 2: 
- 
-            alturas.append( 
-                ancho_foto2 
-                * fotos_pdf[1]["alto"] 
-                / fotos_pdf[1]["ancho"] 
-            ) 
- 
-        if alturas: 
- 
-            alto_fotos = max( 
-                alturas 
-            ) 
- 
-        else: 
- 
-            alto_fotos = 2.5 * cm 
- 
-        # ==================================================== 
-        # ALTURA MÁXIMA 
-        # ==================================================== 
- 
-        alto_encabezado = 1.1 * cm 
- 
-        alto_maximo = ( 
-            alto_util 
-            - alto_encabezado 
-            - 0.5 * cm 
-        ) 
- 
-        if alto_fotos > alto_maximo: 
- 
-            factor = ( 
-                alto_maximo 
-                / alto_fotos 
-            ) 
- 
-            ancho_foto1 *= factor 
-            ancho_foto2 *= factor 
- 
-            alto_fotos = alto_maximo 
- 
-        # ==================================================== 
-        # CREAR IMÁGENES 
-        # ==================================================== 
- 
-        celdas_foto = [] 
- 
-        for posicion in range(2): 
- 
-            if posicion >= cantidad_fotos: 
- 
-                celdas_foto.append("") 
-                continue 
- 
-            foto = fotos_pdf[posicion] 
- 
-            ancho_original = foto["ancho"] 
-            alto_original = foto["alto"] 
- 
-            if posicion == 0: 
- 
-                ancho_celda = ancho_foto1 
- 
-            else: 
- 
-                ancho_celda = ancho_foto2 
- 
-            ancho_maximo = max( 
-                1, 
-                ancho_celda - 4 
-            ) 
- 
-            alto_maximo_imagen = max( 
-                1, 
-                alto_fotos - 4 
-            ) 
- 
-            escala = min( 
-                ancho_maximo / ancho_original, 
-                alto_maximo_imagen / alto_original 
-            ) 
- 
-            ancho_final = ( 
-                ancho_original 
-                * escala 
-            ) 
- 
-            alto_final = ( 
-                alto_original 
-                * escala 
-            ) 
- 
-            imagen_pdf = RLImage( 
-                foto["buffer"], 
-                width=ancho_final, 
-                height=alto_final 
-            ) 
- 
-            celdas_foto.append( 
-                imagen_pdf 
-            ) 
- 
-        # ==================================================== 
-        # ANCHOS FINALES 
-        # ==================================================== 
- 
-        anchos = [ 
-            anchos_datos[0], 
-            anchos_datos[1], 
-            anchos_datos[2], 
-            anchos_datos[3], 
-            anchos_datos[4], 
-            anchos_datos[5], 
-            ( 
-                ancho_foto1 
-                if cantidad_fotos >= 1 
-                else 3 * cm 
-            ), 
-            ( 
-                ancho_foto2 
-                if cantidad_fotos >= 2 
-                else 3 * cm 
-            ) 
-        ] 
- 
-        # ==================================================== 
-        # ASEGURAR QUE NO SUPERE A3 
-        # ==================================================== 
- 
-        suma_anchos = sum( 
-            anchos 
-        ) 
- 
-        if suma_anchos > ancho_util: 
- 
-            factor = ( 
-                ancho_util 
-                / suma_anchos 
-            ) 
- 
-            anchos = [ 
-                x * factor 
-                for x in anchos 
-            ] 
- 
-        # ==================================================== 
-        # TABLA 
-        # ==================================================== 
- 
-        datos = [ 
- 
-            [ 
-                Paragraph( 
-                    "SUMINISTRO", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "MEDIDOR", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "DIRECCIÓN", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "OBS", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "OBS_DESCRIPCION", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "LECTURA", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "FOTO 1", 
-                    estilo_encabezado 
-                ), 
-                Paragraph( 
-                    "FOTO 2", 
-                    estilo_encabezado 
-                ) 
-            ], 
- 
-            [ 
-                Paragraph( 
-                    suministro, 
-                    estilo_dato 
-                ), 
-                Paragraph( 
-                    medidor, 
-                    estilo_dato 
-                ), 
-                Paragraph( 
-                    direccion, 
-                    estilo_dato 
-                ), 
-                Paragraph( 
-                    obs, 
-                    estilo_dato 
-                ), 
-                Paragraph( 
-                    obs_descripcion, 
-                    estilo_dato 
-                ), 
-                Paragraph( 
-                    lectura, 
-                    estilo_dato 
-                ), 
-                celdas_foto[0], 
-                celdas_foto[1] 
-            ] 
-        ] 
- 
-        tabla = Table( 
-            datos, 
-            colWidths=anchos, 
-            rowHeights=[ 
-                alto_encabezado, 
-                alto_fotos 
-            ], 
-            splitByRow=0, 
-            hAlign="CENTER" 
-        ) 
- 
-        # ==================================================== 
-        # ESTILO 
-        # ==================================================== 
- 
-        tabla.setStyle( 
-            TableStyle([ 
-                ( 
-                    "BACKGROUND", 
-                    (0, 0), 
-                    (-1, 0), 
-                    colors.HexColor("#D9E1F2") 
-                ), 
-                ( 
-                    "FONTNAME", 
-                    (0, 0), 
-                    (-1, 0), 
-                    "Helvetica-Bold" 
-                ), 
-                ( 
-                    "FONTSIZE", 
-                    (0, 0), 
-                    (-1, 0), 
-                    8 
-                ), 
-                ( 
-                    "ALIGN", 
-                    (0, 0), 
-                    (-1, -1), 
-                    "CENTER" 
-                ), 
-                ( 
-                    "VALIGN", 
-                    (0, 0), 
-                    (-1, -1), 
-                    "MIDDLE" 
-                ), 
-                ( 
-                    "GRID", 
-                    (0, 0), 
-                    (-1, -1), 
-                    0.7, 
-                    colors.black 
-                ), 
-                ( 
-                    "LEFTPADDING", 
-                    (0, 0), 
-                    (-1, -1), 
-                    2 
-                ), 
-                ( 
-                    "RIGHTPADDING", 
-                    (0, 0), 
-                    (-1, -1), 
-                    2 
-                ), 
-                ( 
-                    "TOPPADDING", 
-                    (0, 0), 
-                    (-1, -1), 
-                    2 
-                ), 
-                ( 
-                    "BOTTOMPADDING", 
-                    (0, 0), 
-                    (-1, -1), 
-                    2 
-                ) 
-            ]) 
-        ) 
- 
-        # ==================================================== 
-        # AGREGAR 
-        # ==================================================== 
- 
-        elementos.append( 
-            tabla 
-        ) 
- 
-        # ==================================================== 
-        # UNA PÁGINA POR REGISTRO 
-        # ==================================================== 
- 
-        if indice < total_registros - 1: 
- 
-            elementos.append( 
-                PageBreak() 
-            ) 
- 
-    # ======================================================== 
-    # GENERAR PDF 
-    # ======================================================== 
- 
-    doc.build( 
-        elementos 
-    ) 
- 
-    archivo_salida.seek(0) 
- 
-    return archivo_salida

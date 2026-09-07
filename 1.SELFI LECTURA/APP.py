@@ -6,8 +6,6 @@ from modulo_galeria_lectura import ejecutar_galeria_lectura
 from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto
 from modulo_generacion_mapa import ejecutar_generacion_mapa
 
-st.set_page_config(page_title="Sistema SIGOF", layout="wide")
-
 # ----------------------------
 # USUARIOS DEL SISTEMA
 # ----------------------------

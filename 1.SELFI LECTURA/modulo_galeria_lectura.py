@@ -1316,13 +1316,10 @@ def generar_html_pdf_navegador(df):
 
     html_documento = f"""
 <!DOCTYPE html>
-
 <html lang="es">
-
 <head>
-
 <meta charset="UTF-8">
-
+<title>Galería de Fotos Lectura</title>
 <style>
 
 @page {{

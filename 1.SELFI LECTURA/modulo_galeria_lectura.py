@@ -18,7 +18,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ============================================================
 # CONFIGURACIÓN
 # ============================================================
+
 TIMEOUT = 20
+
 EXTENSIONES_IMAGEN = (
     ".jpg",
     ".jpeg",
@@ -31,6 +33,7 @@ EXTENSIONES_IMAGEN = (
 # ============================================================
 # CONFIGURACIÓN PLAYWRIGHT PARA WINDOWS + STREAMLIT
 # ============================================================
+
 if sys.platform == "win32":
     try:
         asyncio.set_event_loop_policy(
@@ -43,6 +46,7 @@ if sys.platform == "win32":
 # ============================================================
 # LEER EXCEL Y OBTENER HIPERVÍNCULOS
 # ============================================================
+
 @st.cache_data(show_spinner=False)
 def leer_excel_con_links(archivo):
 
@@ -64,6 +68,7 @@ def leer_excel_con_links(archivo):
         if str(col).strip().lower() == "foto":
 
             columna_foto = col
+
             break
 
     if columna_foto is None:
@@ -91,6 +96,7 @@ def leer_excel_con_links(archivo):
         ):
 
             numero_columna_foto = celda.column
+
             break
 
     if numero_columna_foto is None:
@@ -150,6 +156,7 @@ def leer_excel_con_links(archivo):
 # ============================================================
 # EXTRAER ENLACES DE IMÁGENES
 # ============================================================
+
 def extraer_imagenes(url):
 
     """
@@ -159,11 +166,13 @@ def extraer_imagenes(url):
     """
 
     if not url:
+
         return []
 
     url = str(url).strip()
 
     if "servicios.distriluz.com.pe/FieldService" in url:
+
         return []
 
     try:
@@ -183,6 +192,7 @@ def extraer_imagenes(url):
         )
 
         if respuesta.status_code != 200:
+
             return []
 
         content_type = respuesta.headers.get(
@@ -191,6 +201,7 @@ def extraer_imagenes(url):
         ).lower()
 
         if "image/" in content_type:
+
             return [url]
 
         soup = BeautifulSoup(
@@ -199,6 +210,7 @@ def extraer_imagenes(url):
         )
 
         imagenes = []
+
         vistas = set()
 
         for img in soup.find_all("img"):
@@ -213,11 +225,13 @@ def extraer_imagenes(url):
                 valor = img.get(atributo)
 
                 if not valor:
+
                     continue
 
                 valor = str(valor).strip()
 
                 if not valor:
+
                     continue
 
                 imagen_url = urljoin(
@@ -226,6 +240,7 @@ def extraer_imagenes(url):
                 )
 
                 if imagen_url in vistas:
+
                     continue
 
                 extension = (
@@ -239,6 +254,7 @@ def extraer_imagenes(url):
                 ):
 
                     vistas.add(imagen_url)
+
                     imagenes.append(imagen_url)
 
         for enlace in soup.find_all(
@@ -251,6 +267,7 @@ def extraer_imagenes(url):
             ).strip()
 
             if not href:
+
                 continue
 
             imagen_url = urljoin(
@@ -259,6 +276,7 @@ def extraer_imagenes(url):
             )
 
             if imagen_url in vistas:
+
                 continue
 
             extension = (
@@ -272,20 +290,24 @@ def extraer_imagenes(url):
             ):
 
                 vistas.add(imagen_url)
+
                 imagenes.append(imagen_url)
 
         return imagenes
 
     except requests.RequestException:
+
         return []
 
     except Exception:
+
         return []
 
 
 # ============================================================
 # EXTRAER IMÁGENES SIGOF EN PARALELO
 # ============================================================
+
 def extraer_imagenes_sigof_paralelo(
     urls,
     trabajadores=10
@@ -298,22 +320,26 @@ def extraer_imagenes_sigof_paralelo(
     for url in urls:
 
         if not url:
+
             continue
 
         url = str(url).strip()
 
         if not url:
+
             continue
 
         if (
             "servicios.distriluz.com.pe/FieldService"
             in url
         ):
+
             continue
 
         urls_validas.append(url)
 
     if not urls_validas:
+
         return resultados
 
     urls_validas = list(
@@ -325,10 +351,12 @@ def extraer_imagenes_sigof_paralelo(
     ) as executor:
 
         futuros = {
+
             executor.submit(
                 extraer_imagenes,
                 url
             ): url
+
             for url in urls_validas
         }
 
@@ -352,6 +380,7 @@ def extraer_imagenes_sigof_paralelo(
 # ============================================================
 # OBTENER FOTOS FIELDSERVICE EN PARALELO
 # ============================================================
+
 def obtener_fotos_fieldservice_paralelo(
     urls,
     trabajadores=10
@@ -364,14 +393,17 @@ def obtener_fotos_fieldservice_paralelo(
     for url in urls:
 
         if not url:
+
             continue
 
         url = str(url).strip()
 
         if not url:
+
             continue
 
         if "servicios.distriluz.com.pe/FieldService" not in url:
+
             continue
 
         urls_validas.append(url)
@@ -381,6 +413,7 @@ def obtener_fotos_fieldservice_paralelo(
     )
 
     if not urls_validas:
+
         return resultados
 
     with ThreadPoolExecutor(
@@ -388,10 +421,12 @@ def obtener_fotos_fieldservice_paralelo(
     ) as executor:
 
         futuros = {
+
             executor.submit(
                 obtener_urls_fotos_fieldservice,
                 url
             ): url
+
             for url in urls_validas
         }
 
@@ -416,17 +451,21 @@ def obtener_fotos_fieldservice_paralelo(
 # OBTENER ENLACES DIRECTOS DE FOTOS FIELDSERVICE
 # MEDIANTE LA API
 # ============================================================
+
 def obtener_urls_fotos_fieldservice(url):
 
     if not url:
+
         return []
 
     url = str(url).strip()
 
     if not url:
+
         return []
 
     if "servicios.distriluz.com.pe/FieldService" not in url:
+
         return []
 
     try:
@@ -434,6 +473,7 @@ def obtener_urls_fotos_fieldservice(url):
         uuid = url.rstrip("/").split("/")[-1]
 
         if not uuid:
+
             return []
 
         url_api = (
@@ -459,11 +499,13 @@ def obtener_urls_fotos_fieldservice(url):
         )
 
         if respuesta.status_code != 200:
+
             return []
 
         json_texto = respuesta.text
 
         if not json_texto:
+
             return []
 
         url_lectura = ""
@@ -501,23 +543,32 @@ def obtener_urls_fotos_fieldservice(url):
         urls_fotos = []
 
         if url_lectura:
-            urls_fotos.append(url_lectura)
+
+            urls_fotos.append(
+                url_lectura
+            )
 
         if url_medidor:
-            urls_fotos.append(url_medidor)
+
+            urls_fotos.append(
+                url_medidor
+            )
 
         return urls_fotos[:2]
 
     except requests.RequestException:
+
         return []
 
     except Exception:
+
         return []
 
 
 # ============================================================
 # MOSTRAR INFORMACIÓN
 # ============================================================
+
 def mostrar_datos(
     fila,
     columnas_mostrar
@@ -564,6 +615,7 @@ def mostrar_datos(
 # ============================================================
 # MOSTRAR FOTOS
 # ============================================================
+
 def mostrar_fotos(
     url,
     imagenes_sigof=None
@@ -582,6 +634,7 @@ def mostrar_fotos(
     # ========================================================
     # FIELDSERVICE
     # ========================================================
+
     if "servicios.distriluz.com.pe/FieldService" in url:
 
         if imagenes_sigof is not None:
@@ -628,6 +681,7 @@ def mostrar_fotos(
     # ========================================================
     # SIGOF
     # ========================================================
+
     if imagenes_sigof is not None:
 
         imagenes = imagenes_sigof
@@ -693,6 +747,7 @@ def mostrar_fotos(
 # ============================================================
 # MOSTRAR UN REGISTRO
 # ============================================================
+
 def mostrar_registro(
     indice,
     fila,
@@ -705,12 +760,13 @@ def mostrar_registro(
     )
 
     if pd.isna(url) or not str(url).strip():
+
         return
 
     with st.container(
         border=True
     ):
-        
+
         st.divider()
 
         mostrar_fotos(
@@ -727,10 +783,11 @@ def mostrar_registro(
                 columnas_mostrar
             )
 
-        
+
 # ============================================================
 # MOSTRAR REGISTRO PROGRESIVO
 # ============================================================
+
 def mostrar_registro_progresivo(
     indice,
     fila,
@@ -753,6 +810,7 @@ def mostrar_registro_progresivo(
         )
 
     if pd.isna(url):
+
         url = ""
 
     url = str(url).strip()
@@ -821,6 +879,7 @@ def mostrar_registro_progresivo(
             )
 
             if pd.isna(valor):
+
                 valor = ""
 
             st.markdown(
@@ -849,9 +908,11 @@ def mostrar_registro_progresivo(
 # ============================================================
 # DETECTAR SI LA URL ES FIELDSERVICE
 # ============================================================
+
 def es_fieldservice(url):
 
     if not url:
+
         return False
 
     return (
@@ -863,6 +924,7 @@ def es_fieldservice(url):
 # ============================================================
 # GENERAR HTML PARA PDF DESDE EL NAVEGADOR
 # ============================================================
+
 def generar_html_pdf_navegador(df):
 
     df = df.copy()
@@ -943,6 +1005,7 @@ def generar_html_pdf_navegador(df):
     ):
 
         if not columna:
+
             return ""
 
         valor = fila.get(
@@ -951,6 +1014,7 @@ def generar_html_pdf_navegador(df):
         )
 
         if pd.isna(valor):
+
             return ""
 
         if isinstance(valor, float):
@@ -968,6 +1032,7 @@ def generar_html_pdf_navegador(df):
     def obtener_urls_fotos_pdf(url):
 
         if not url:
+
             return []
 
         url = str(url).strip()
@@ -1101,10 +1166,13 @@ def generar_html_pdf_navegador(df):
                 )
 
         pagina = f"""
+
         <section class="registro">
 
             <div class="titulo-registro">
+
                 📷 Registro {indice}
+
             </div>
 
             <table class="tabla">
@@ -1114,12 +1182,19 @@ def generar_html_pdf_navegador(df):
                     <tr>
 
                         <th>SUMINISTRO</th>
+
                         <th>MEDIDOR</th>
+
                         <th>DIRECCIÓN</th>
+
                         <th>OBS</th>
+
                         <th>OBS_DESCRIPCION</th>
+
                         <th>LECTURA</th>
+
                         <th>FOTO 1</th>
+
                         <th>FOTO 2</th>
 
                     </tr>
@@ -1155,6 +1230,7 @@ def generar_html_pdf_navegador(df):
                         </td>
 
                         {celdas_fotos[0]}
+
                         {celdas_fotos[1]}
 
                     </tr>
@@ -1164,6 +1240,7 @@ def generar_html_pdf_navegador(df):
             </table>
 
         </section>
+
         """
 
         paginas.append(
@@ -1180,6 +1257,7 @@ def generar_html_pdf_navegador(df):
     )
 
     html_documento = f"""
+
 <!DOCTYPE html>
 
 <html lang="es">
@@ -1193,149 +1271,247 @@ def generar_html_pdf_navegador(df):
 <style>
 
 @page {{
+
     size: A3 landscape;
+
     margin: 8mm;
+
 }}
 
 * {{
+
     box-sizing: border-box;
+
 }}
 
 html,
+
 body {{
+
     margin: 0;
+
     padding: 0;
+
     font-family: Arial, Helvetica, sans-serif;
+
 }}
 
 body {{
+
     background: white;
+
 }}
 
 #barra {{
+
     width: 100%;
+
     padding: 12px;
+
     text-align: center;
+
 }}
 
 #btn_pdf {{
+
     border: none;
+
     border-radius: 6px;
+
     padding: 12px 24px;
+
     font-size: 16px;
+
     font-weight: bold;
+
     cursor: pointer;
+
     background: #ff4b4b;
+
     color: white;
+
 }}
 
 #btn_pdf:hover {{
+
     opacity: 0.9;
+
 }}
 
 #estado {{
+
     margin-top: 8px;
+
     font-size: 13px;
+
 }}
 
 #contenido_pdf {{
+
     display: none;
+
 }}
 
 .registro {{
+
     width: 100%;
+
     min-height: 281mm;
+
     page-break-after: always;
+
     break-after: page;
+
     overflow: visible;
+
     padding: 0;
+
 }}
 
 .registro:last-child {{
+
     page-break-after: auto;
+
     break-after: auto;
+
 }}
 
 .titulo-registro {{
+
     font-size: 18px;
+
     font-weight: bold;
+
     text-align: left;
+
     margin-bottom: 5mm;
+
 }}
 
 .tabla {{
+
     width: 100%;
+
     min-width: 100%;
+
     border-collapse: collapse;
+
     table-layout: fixed;
+
 }}
 
 .tabla th,
+
 .tabla td {{
+
     border: 0.7px solid #000;
+
     padding: 2mm;
+
     text-align: center;
+
     vertical-align: middle;
+
     word-break: break-word;
+
 }}
 
 .tabla th {{
+
     background: #D9E1F2;
+
     font-size: 10px;
+
     font-weight: bold;
+
     height: 12mm;
+
 }}
 
 .tabla td {{
+
     font-size: 10px;
+
 }}
 
 .tabla th:nth-child(7),
+
 .tabla td:nth-child(7),
+
 .tabla th:nth-child(8),
+
 .tabla td:nth-child(8) {{
+
     width: 124mm !important;
+
     min-width: 124mm !important;
+
     max-width: 124mm !important;
+
     padding: 1mm !important;
+
     margin: 0 !important;
+
 }}
 
 .celda-foto {{
+
     padding: 1mm !important;
+
     vertical-align: middle;
+
     text-align: center;
+
     overflow: hidden;
+
     white-space: nowrap;
+
 }}
 
 .celda-foto img {{
+
     display: block;
+
     width: 120mm;
+
     max-width: 100%;
+
     height: auto;
+
     margin: 0;
+
     padding: 0;
+
 }}
 
 .sin-foto {{
+
     color: #777;
+
     font-size: 10px;
+
 }}
 
 @media print {{
 
     #barra {{
+
         display: none !important;
+
     }}
 
     #contenido_pdf {{
+
         display: block !important;
+
     }}
 
     body {{
+
         margin: 0;
+
         padding: 0;
+
     }}
 
 }}
@@ -1352,12 +1528,15 @@ body {{
         id="btn_pdf"
         onclick="generarPDF()"
     >
+
         📥 Generar PDF con Fotos
+
     </button>
 
     <div id="estado">
 
         El PDF se abrirá mediante el navegador.
+
         Seleccione <b>Guardar como PDF</b>.
 
     </div>
@@ -1367,6 +1546,7 @@ body {{
 <div
     id="contenido_pdf"
 >
+
 </div>
 
 <script>
@@ -1382,11 +1562,8 @@ async function esperarImagenes() {{
     );
 
     await Promise.all(
-
         imagenes.map(
-
             imagen => new Promise(
-
                 resolve => {{
 
                     if (imagen.complete) {{
@@ -1402,11 +1579,8 @@ async function esperarImagenes() {{
                     imagen.onerror = resolve;
 
                 }}
-
             )
-
         )
-
     );
 
 }}
@@ -1441,12 +1615,10 @@ async function generarPDF() {{
         "Abriendo el diálogo de impresión...";
 
     await new Promise(
-
         resolve => setTimeout(
             resolve,
             300
         )
-
     );
 
     window.print();
@@ -1477,6 +1649,7 @@ window.onafterprint = function() {{
 </body>
 
 </html>
+
 """
 
     return html_documento
@@ -1485,6 +1658,7 @@ window.onafterprint = function() {{
 # ============================================================
 # FUNCIÓN PRINCIPAL
 # ============================================================
+
 def ejecutar_galeria_lectura():
 
     st.title(
@@ -1499,6 +1673,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # CARGAR EXCEL
     # ========================================================
+
     archivo = st.file_uploader(
         "📂 Seleccionar archivo Excel",
         type=["xlsx", "xls"],
@@ -1571,6 +1746,19 @@ def ejecutar_galeria_lectura():
                 None
             )
 
+            # =================================================
+            # LIMPIAR RESULTADOS DEL EXCEL ANTERIOR
+            # =================================================
+
+            st.session_state.pop(
+                "galeria_registros_listos",
+                None
+            )
+
+            st.session_state.galeria_imagenes_sigof = {}
+
+            st.session_state.galeria_imagenes_fieldservice = {}
+
         except Exception as e:
 
             st.error(
@@ -1632,6 +1820,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # SIDEBAR
     # ========================================================
+
     st.sidebar.header(
         "⚙️ Configuración"
     )
@@ -1674,6 +1863,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # FILTRAR REGISTROS CON FOTO
     # ========================================================
+
     df_filtrado = df.copy()
 
     df_filtrado = df_filtrado[
@@ -1690,6 +1880,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # APLICAR FILTROS
     # ========================================================
+
     for columna in filtros_habilitados:
 
         valores_filtro = df_filtrado[
@@ -1729,6 +1920,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # RESULTADOS
     # ========================================================
+
     total_filtrado = len(
         df_filtrado
     )
@@ -1749,6 +1941,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # DETECTAR CAMBIO DE RESULTADO DEL FILTRO
     # ========================================================
+
     resultado_filtro_id = tuple(
         df_filtrado.index.tolist()
     )
@@ -1773,9 +1966,21 @@ def ejecutar_galeria_lectura():
             None
         )
 
+        # =====================================================
+        # EL FILTRO CAMBIÓ:
+        # LOS REGISTROS MOSTRADOS SE REINICIAN
+        # PERO LAS FOTOS YA OBTENIDAS SE CONSERVAN
+        # =====================================================
+
+        st.session_state.pop(
+            "galeria_registros_listos",
+            None
+        )
+
     # ========================================================
     # TAMAÑO DEL BLOQUE
     # ========================================================
+
     TAMANO_BLOQUE = 200
 
     fotos_hasta = st.session_state.get(
@@ -1786,6 +1991,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # TODAVÍA NO CARGAMOS FOTOGRAFÍAS
     # ========================================================
+
     if fotos_hasta == 0:
 
         st.info(
@@ -1826,8 +2032,9 @@ def ejecutar_galeria_lectura():
         st.stop()
 
     # ========================================================
-    # TOMAR SOLO LOS REGISTROS DEL BLOQUE
+    # TOMAR TODOS LOS REGISTROS QUE SE DEBEN MOSTRAR
     # ========================================================
+
     registros_a_mostrar = df_filtrado.iloc[
         :fotos_hasta
     ]
@@ -1861,12 +2068,29 @@ def ejecutar_galeria_lectura():
     )
 
     # ============================================================
-    # PREPARAR CONSULTAS SIGOF Y FIELDSERVICE
+    # DETERMINAR EXCLUSIVAMENTE EL NUEVO BLOQUE DE 200
     # ============================================================
+
+    inicio_bloque = max(
+        0,
+        fotos_hasta - TAMANO_BLOQUE
+    )
+
+    registros_consulta = list(
+        df_filtrado.iloc[
+            inicio_bloque:fotos_hasta
+        ].iterrows()
+    )
+
+    # ============================================================
+    # PREPARAR CONSULTAS SOLO DEL BLOQUE NUEVO
+    # ============================================================
+
     urls_sigof = []
+
     urls_fieldservice = []
 
-    for _, fila in registros:
+    for _, fila in registros_consulta:
 
         url = fila.get(
             "__url_foto"
@@ -1884,11 +2108,13 @@ def ejecutar_galeria_lectura():
             )
 
         if pd.isna(url):
+
             continue
 
         url = str(url).strip()
 
         if not url:
+
             continue
 
         if "servicios.distriluz.com.pe/FieldService" in url:
@@ -1916,8 +2142,9 @@ def ejecutar_galeria_lectura():
     )
 
     # ============================================================
-    # INICIALIZAR CACHÉ DE FOTOS
+    # INICIALIZAR ESTADO DE FOTOS
     # ============================================================
+
     if "galeria_imagenes_sigof" not in st.session_state:
 
         st.session_state.galeria_imagenes_sigof = {}
@@ -1929,11 +2156,13 @@ def ejecutar_galeria_lectura():
     # ============================================================
     # CONFIGURACIÓN
     # ============================================================
-    TAMANO_CONSULTAS = 20
+
+    TAMANO_CONSULTAS = 10
 
     # ============================================================
     # FUNCIÓN PARA DIBUJAR LOS REGISTROS YA LISTOS
     # ============================================================
+
     def renderizar_registros_listos():
 
         registros_listos = (
@@ -1967,11 +2196,13 @@ def ejecutar_galeria_lectura():
                 )
 
             if pd.isna(url):
+
                 continue
 
             url = str(url).strip()
 
             if not url:
+
                 continue
 
             if contador % 2 == 0:
@@ -2029,7 +2260,7 @@ def ejecutar_galeria_lectura():
                             fila,
                             columnas_mostrar
                         )
-                    
+
                     observaciones = [
                         "Desenfocada",
                         "Sin observación",
@@ -2054,6 +2285,7 @@ def ejecutar_galeria_lectura():
     # ============================================================
     # IDENTIFICADOR DEL PROCESO ACTUAL
     # ============================================================
+
     job_id = (
         resultado_filtro_id,
         fotos_hasta
@@ -2062,6 +2294,7 @@ def ejecutar_galeria_lectura():
     # ============================================================
     # CREAR EL PROCESO SOLO UNA VEZ
     # ============================================================
+
     if st.session_state.get(
         "galeria_job_id"
     ) != job_id:
@@ -2088,6 +2321,7 @@ def ejecutar_galeria_lectura():
         # --------------------------------------------------------
         # FIELDSERVICE
         # --------------------------------------------------------
+
         for url in urls_fieldservice:
 
             if (
@@ -2105,6 +2339,7 @@ def ejecutar_galeria_lectura():
         # --------------------------------------------------------
         # SIGOF
         # --------------------------------------------------------
+
         for url in urls_sigof:
 
             if (
@@ -2122,7 +2357,16 @@ def ejecutar_galeria_lectura():
         # ========================================================
         # REGISTROS YA CARGADOS
         # ========================================================
-        registros_listos = []
+
+        registros_listos = st.session_state.get(
+            "galeria_registros_listos",
+            []
+        )
+
+        indices_existentes = {
+            registro[1]
+            for registro in registros_listos
+        }
 
         for posicion, (
             indice_real,
@@ -2145,11 +2389,13 @@ def ejecutar_galeria_lectura():
                 )
 
             if pd.isna(url):
+
                 continue
 
             url = str(url).strip()
 
             if not url:
+
                 continue
 
             if es_fieldservice(url):
@@ -2166,7 +2412,11 @@ def ejecutar_galeria_lectura():
                     in st.session_state.galeria_imagenes_sigof
                 )
 
-            if ya_cargada:
+            if (
+                ya_cargada
+                and indice_real
+                not in indices_existentes
+            ):
 
                 registros_listos.append(
                     (
@@ -2176,9 +2426,14 @@ def ejecutar_galeria_lectura():
                     )
                 )
 
+                indices_existentes.add(
+                    indice_real
+                )
+        
         # ========================================================
         # GUARDAR ESTADO
         # ========================================================
+
         st.session_state.galeria_job_id = (
             job_id
         )
@@ -2202,6 +2457,7 @@ def ejecutar_galeria_lectura():
         # ========================================================
         # SI NO HAY CONSULTAS PENDIENTES
         # ========================================================
+
         if not urls_pendientes:
 
             st.session_state.galeria_executor = None
@@ -2219,6 +2475,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # CREAR EJECUTOR CON MÁXIMO 20 CONSULTAS
             # ====================================================
+
             executor = ThreadPoolExecutor(
                 max_workers=TAMANO_CONSULTAS
             )
@@ -2230,6 +2487,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # LANZAR SOLO LAS PRIMERAS 20
             # ====================================================
+
             lote_inicial = (
                 urls_pendientes[
                     :TAMANO_CONSULTAS
@@ -2268,6 +2526,7 @@ def ejecutar_galeria_lectura():
     # ============================================================
     # PROCESO PROGRESIVO
     # ============================================================
+
     if not st.session_state.get(
         "galeria_proceso_terminado",
         False
@@ -2288,6 +2547,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # DETECTAR CONSULTAS TERMINADAS
             # ====================================================
+
             terminados = []
 
             for futuro in list(
@@ -2303,6 +2563,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # PROCESAR TODAS LAS TERMINADAS
             # ====================================================
+
             for futuro in terminados:
 
                 tipo, url = (
@@ -2324,6 +2585,7 @@ def ejecutar_galeria_lectura():
                 # ------------------------------------------------
                 # GUARDAR RESULTADO
                 # ------------------------------------------------
+
                 if tipo == "fieldservice":
 
                     st.session_state.galeria_imagenes_fieldservice[
@@ -2339,11 +2601,13 @@ def ejecutar_galeria_lectura():
                 # ------------------------------------------------
                 # CONTADOR
                 # ------------------------------------------------
+
                 st.session_state.galeria_consultas_terminadas += 1
 
                 # =================================================
                 # AGREGAR TODOS LOS REGISTROS QUE USAN ESA URL
                 # =================================================
+
                 registros_listos = (
                     st.session_state.get(
                         "galeria_registros_listos",
@@ -2351,8 +2615,8 @@ def ejecutar_galeria_lectura():
                     )
                 )
 
-                posiciones_existentes = {
-                    registro[0]
+                indices_existentes = {
+                    registro[1]
                     for registro in registros_listos
                 }
 
@@ -2377,6 +2641,7 @@ def ejecutar_galeria_lectura():
                         )
 
                     if pd.isna(url_registro):
+
                         continue
 
                     url_registro = str(
@@ -2385,8 +2650,8 @@ def ejecutar_galeria_lectura():
 
                     if (
                         url_registro == url
-                        and posicion
-                        not in posiciones_existentes
+                        and indice_real
+                        not in indices_existentes
                     ):
 
                         registros_listos.append(
@@ -2397,10 +2662,10 @@ def ejecutar_galeria_lectura():
                             )
                         )
 
-                        posiciones_existentes.add(
-                            posicion
+                        indices_existentes.add(
+                            indice_real
                         )
-
+                
                 st.session_state.galeria_registros_listos = (
                     registros_listos
                 )
@@ -2408,6 +2673,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # MANTENER SIEMPRE 20 CONSULTAS ACTIVAS
             # ====================================================
+
             executor_actual = (
                 st.session_state.get(
                     "galeria_executor"
@@ -2471,6 +2737,7 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # ESTADO
             # ====================================================
+
             total_consultas = (
                 st.session_state.get(
                     "galeria_total_consultas",
@@ -2512,11 +2779,13 @@ def ejecutar_galeria_lectura():
             # ====================================================
             # MOSTRAR REGISTROS QUE YA ESTÁN LISTOS
             # ====================================================
+
             renderizar_registros_listos()
 
             # ====================================================
             # VERIFICAR FIN DEL PROCESO
             # ====================================================
+
             if (
                 not futuros_actuales
                 and not urls_pendientes
@@ -2549,6 +2818,7 @@ def ejecutar_galeria_lectura():
                 # HACER RERUN COMPLETO PARA QUE LA GALERÍA
                 # PERMANEZCA Y LUEGO APAREZCAN PDF/EXCEL
                 # =================================================
+
                 st.rerun()
 
         actualizar_galeria()
@@ -2556,18 +2826,11 @@ def ejecutar_galeria_lectura():
         # ========================================================
         # DETENER EL RESTO MIENTRAS SE CARGAN FOTOS
         # ========================================================
+
         st.stop()
 
     # ============================================================
     # PROCESO TERMINADO
-    # ============================================================
-    # AQUÍ ESTÁ EL CAMBIO IMPORTANTE:
-    #
-    # Después del st.rerun() anterior, Streamlit vuelve a ejecutar
-    # la aplicación completa. Como el proceso ya está terminado,
-    # el fragmento no se ejecuta nuevamente.
-    #
-    # Por eso debemos dibujar nuevamente los registros aquí.
     # ============================================================
 
     renderizar_registros_listos()
@@ -2580,6 +2843,7 @@ def ejecutar_galeria_lectura():
     # ============================================================
     # SIGUIENTE BLOQUE
     # ============================================================
+
     if fotos_hasta < total_filtrado:
 
         restantes = (
@@ -2641,6 +2905,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # EXPORTAR PDF CON FOTOS
     # ========================================================
+
     st.subheader(
         "📄 Exportar registros"
     )
@@ -2654,11 +2919,13 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # BOTONES DE EXPORTACIÓN
     # ========================================================
+
     col_pdf, col_excel = st.columns(2)
 
     # ========================================================
     # GENERAR PDF DESDE EL NAVEGADOR
     # ========================================================
+
     with col_pdf:
 
         html_pdf = generar_html_pdf_navegador(
@@ -2674,6 +2941,7 @@ def ejecutar_galeria_lectura():
     # ========================================================
     # DESCARGAR EXCEL
     # ========================================================
+
     with col_excel:
 
         df_excel = df_filtrado.copy()
@@ -2681,6 +2949,7 @@ def ejecutar_galeria_lectura():
         # ====================================================
         # AGREGAR OBSERVACIÓN
         # ====================================================
+
         observaciones_excel = []
 
         for posicion, (
@@ -2711,6 +2980,7 @@ def ejecutar_galeria_lectura():
         # ====================================================
         # ELIMINAR COLUMNA INTERNA
         # ====================================================
+
         if "__url_foto" in df_excel.columns:
 
             df_excel = df_excel.drop(
@@ -2720,6 +2990,7 @@ def ejecutar_galeria_lectura():
         # ====================================================
         # CREAR EXCEL EN MEMORIA
         # ====================================================
+
         excel_salida = BytesIO()
 
         with pd.ExcelWriter(
@@ -2738,6 +3009,7 @@ def ejecutar_galeria_lectura():
         # ====================================================
         # BOTÓN
         # ====================================================
+
         st.download_button(
             label="📊 Descargar Excel",
             data=excel_salida,

@@ -5,6 +5,7 @@ from modulo_galeria_reparto import ejecutar_galeria_reparto
 from modulo_galeria_lectura import ejecutar_galeria_lectura
 from modulo_seguimiento_reparto import ejecutar_seguimiento_reparto
 from modulo_generacion_mapa import ejecutar_generacion_mapa
+from modulo_fieldservice import ejecutar_fieldservice
 
 st.set_page_config(page_title="FOTOS", layout="wide")
 
@@ -63,7 +64,8 @@ else:
             "Galería Fotos Reparto",
             "Galería Fotos Lectura",
             "Seguimiento Reparto",
-            "Generación de Mapa", 
+            "Generación de Mapa",
+            "FieldService", 
         ]
     )
 
@@ -86,3 +88,6 @@ else:
     elif opcion == "Generación de Mapa":
 
         ejecutar_generacion_mapa()
+    elif opcion == "FieldService":
+        
+        ejecutar_fieldservice()

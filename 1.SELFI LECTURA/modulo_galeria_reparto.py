@@ -396,7 +396,8 @@ def ejecutar_galeria_reparto():
                     "SOLO RECIBO",
                     "SOLO SUMINISTRO",
                     "DATOS NO COINCIDEN",
-                    "NI RECIBO/NI SUMINISTRO"
+                    "NI RECIBO/NI SUMINISTRO",
+                    "NO HAY FOTO"
                 ]
 
                 for i, (url, suministro, lecturista, _, observacion) in enumerate(urls_pagina):

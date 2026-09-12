@@ -45,7 +45,8 @@ OBSERVACIONES_LISTA = [
     "Sin Camisa - Sin Gorro",
     "Sin Chaleco - Sin Gorro",
     "Sin Fotocheck - Sin Camisa",
-    "Sin Gorro"
+    "Sin Gorro",
+    "Relectura"
 ]
 
 

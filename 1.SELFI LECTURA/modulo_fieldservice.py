@@ -26,6 +26,10 @@ URL_MAPA_RUTA = (
     f"{URL_BASE}/monitoreo/lecturas/mapa/ruta"
 )
 
+URL_PERIODOS = (
+    f"{URL_BASE}/listageneral/periodo-comercial"
+)
+
 
 # ============================================================
 # OBSERVACIONES
@@ -112,6 +116,63 @@ def login_fieldservice(usuario, clave):
     except ValueError:
         return None
 
+# ============================================================
+# OBTENER PERIODOS COMERCIALES
+# ============================================================
+
+def obtener_periodos(unidad_id):
+
+    token = st.session_state.get(
+        "fieldservice_token"
+    )
+
+    if not token:
+        return []
+
+    if unidad_id is None:
+        return []
+
+    empresa_id = 4
+
+    params = {
+        "empresaId": empresa_id,
+        "unidadId": unidad_id
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "x-audit-application": "WEB",
+        "x-audit-username": "72690389"
+    }
+
+    try:
+
+        respuesta = requests.get(
+            URL_PERIODOS,
+            params=params,
+            headers=headers,
+            timeout=30
+        )
+
+        if respuesta.status_code != 200:
+            return []
+
+        datos = respuesta.json()
+
+        if not isinstance(datos, list):
+            return []
+
+        return [
+            item["id"]
+            for item in datos
+            if item.get("id") is not None
+        ]
+
+    except requests.exceptions.RequestException:
+        return []
+
+    except ValueError:
+        return []
 
 # ============================================================
 # OBTENER LECTURISTAS
@@ -1878,9 +1939,13 @@ def ejecutar_fieldservice():
 
     with col_periodo:
 
-        periodos = [
-            202608
-        ]
+        periodos = []
+
+        if unidad_id is not None:
+
+            periodos = obtener_periodos(
+                unidad_id
+            )
 
         periodo = st.selectbox(
 

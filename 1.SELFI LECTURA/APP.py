@@ -59,27 +59,27 @@ else:
     opcion = st.sidebar.selectbox(
         "Selecciona módulo",
         [
-            "Selfie Lectura/Reparto",
+            "Selfie Lectura/Reparto SIGOF",
             "Validación FISE",
-            "Galería Fotos Reparto",
-            "Galería Fotos Lectura",
+            "Galería Fotos Reparto SIGOF",
+            "Galería Fotos Lectura OPTIMUS",
             "Seguimiento Reparto",
             "Generación de Mapa",
-            "FieldService", 
+            "Slefie lectura OPTIMUS", 
         ]
     )
 
     # NAVEGACIÓN
-    if opcion == "Selfie Lectura/Reparto":
+    if opcion == "Selfie Lectura/Reparto SIGOF":
         ejecutar_selfie()
 
     elif opcion == "Validación FISE":
         ejecutar_fise()
 
-    elif opcion == "Galería Fotos Reparto":
+    elif opcion == "Galería Fotos Reparto SIGOF":
         ejecutar_galeria_reparto()
 
-    elif opcion == "Galería Fotos Lectura":
+    elif opcion == "Galería Fotos Lectura OPTIMUS":
         ejecutar_galeria_lectura()
 
     elif opcion == "Seguimiento Reparto": 
@@ -88,6 +88,6 @@ else:
     elif opcion == "Generación de Mapa":
 
         ejecutar_generacion_mapa()
-    elif opcion == "FieldService":
+    elif opcion == "Slefie lectura OPTIMUS":
         
         ejecutar_fieldservice()
